@@ -2148,26 +2148,9 @@ static int sanitize_ptr_alu(struct bpf_verifier_env *env,
 		    (off_reg->smin_value < 0) != (off_reg->smax_value < 0))
 			return REASON_BOUNDS;
 
-		info->mask_to_left = (opcode == BPF_ADD &&  off_is_neg) ||
-				     (opcode == BPF_SUB && !off_is_neg);
-	}
-
-	err = retrieve_ptr_limit(ptr_reg, &alu_limit, info->mask_to_left);
+	err = retrieve_ptr_limit(ptr_reg, &alu_limit, opcode, off_is_neg);
 	if (err < 0)
 		return err;
-
-	if (commit_window) {
-		/* In commit phase we narrow the masking window based on
-		 * the observed pointer move after the simulated operation.
-		 */
-		alu_state = info->aux.alu_state;
-		alu_limit = abs(info->aux.alu_limit - alu_limit);
-	} else {
-		alu_state  = off_is_neg ? BPF_ALU_NEG_VALUE : 0;
-		alu_state |= off_is_imm ? BPF_ALU_IMMEDIATE : 0;
-		alu_state |= ptr_is_dst_reg ?
-			     BPF_ALU_SANITIZE_SRC : BPF_ALU_SANITIZE_DST;
-	}
 
 	err = update_alu_sanitation_state(aux, alu_state, alu_limit);
 	if (err < 0)
@@ -2351,6 +2334,11 @@ static int adjust_ptr_min_max_vals(struct bpf_verifier_env *env,
 
 	switch (opcode) {
 	case BPF_ADD:
+		ret = sanitize_ptr_alu(env, insn, ptr_reg, dst_reg, smin_val < 0);
+		if (ret < 0) {
+			verbose("R%d tried to add from different maps, paths, or prohibited types\n", dst);
+			return ret;
+		}
 		/* We can take a fixed offset as long as it doesn't overflow
 		 * the s32 'off' field
 		 */
@@ -2401,6 +2389,11 @@ static int adjust_ptr_min_max_vals(struct bpf_verifier_env *env,
 		}
 		break;
 	case BPF_SUB:
+		ret = sanitize_ptr_alu(env, insn, ptr_reg, dst_reg, smin_val < 0);
+		if (ret < 0) {
+			verbose("R%d tried to sub from different maps, paths, or prohibited types\n", dst);
+			return ret;
+		}
 		if (dst_reg == off_reg) {
 			/* scalar -= pointer.  Creates an unknown scalar */
 			verbose("R%d tried to subtract pointer from scalar\n",
