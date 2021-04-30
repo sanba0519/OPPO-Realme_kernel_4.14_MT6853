@@ -4890,20 +4890,7 @@ static int fixup_bpf_calls(struct bpf_verifier_env *env)
 			*patch++ = BPF_ALU64_REG(BPF_OR, BPF_REG_AX, off_reg);
 			*patch++ = BPF_ALU64_IMM(BPF_NEG, BPF_REG_AX, 0);
 			*patch++ = BPF_ALU64_IMM(BPF_ARSH, BPF_REG_AX, 63);
-			if (issrc) {
-				*patch++ = BPF_ALU64_REG(BPF_AND, BPF_REG_AX,
-							 off_reg);
-				insn->src_reg = BPF_REG_AX;
-			} else {
-				if (isneg)
-					*patch++ = BPF_ALU64_IMM(BPF_MUL, off_reg, -1);
-				*patch++ = BPF_MOV32_IMM(BPF_REG_AX, aux->alu_limit);
-				*patch++ = BPF_ALU64_REG(BPF_SUB, BPF_REG_AX, off_reg);
-				*patch++ = BPF_ALU64_REG(BPF_OR, BPF_REG_AX, off_reg);
-				*patch++ = BPF_ALU64_IMM(BPF_NEG, BPF_REG_AX, 0);
-				*patch++ = BPF_ALU64_IMM(BPF_ARSH, BPF_REG_AX, 63);
-				*patch++ = BPF_ALU64_REG(BPF_AND, BPF_REG_AX, off_reg);
-			}
+			*patch++ = BPF_ALU64_REG(BPF_AND, BPF_REG_AX, off_reg);
 			if (!issrc)
 				*patch++ = BPF_MOV64_REG(insn->dst_reg, insn->src_reg);
 			insn->src_reg = BPF_REG_AX;
