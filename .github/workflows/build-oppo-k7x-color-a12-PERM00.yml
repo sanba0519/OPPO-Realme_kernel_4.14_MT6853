@@ -18,6 +18,7 @@ jobs:
           sudo apt-get update
           sudo -E apt-get -y -qq install git make bc bison ccache openssl dos2unix zip kmod cpio flex libelf-dev curl libssl-dev libtfm-dev wget device-tree-compiler ca-certificates python3 python2 binutils binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi
           mkdir -p $GITHUB_WORKSPACE/kernel_workspace
+
       - name: 下载 Gcc编译器
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace
@@ -28,57 +29,56 @@ jobs:
           mkdir gcc32
           wget -O gcc-arm.tar.gz https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/+archive/refs/tags/android-12.1.0_r27.tar.gz
           tar -C gcc32/ -zxvf gcc-arm.tar.gz
+
       - name: 下载Clang编译器
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace
           mkdir clang-aosp
           git clone -q --depth=1 https://github.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-6443078 -b 10.0 clang-aosp
+
       - name: 下载内核源码
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace
           git clone https://github.com/sanba0519/android_kernel_4.14_MT6853_PERM00 android-kernel
           cd android-kernel
-      - name: 手动集成 SukiSU-Ultra（最新版 + 4.14 全兼容补丁 + 强制禁用 sucompat）
+
+      - name: 确认并最终适配 SukiSU-Ultra（使用仓库中已 push 的版本 + 4.14 补丁）
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
-          rm -rf KernelSU
-          git clone --depth=1 https://github.com/SukiSU-Ultra/SukiSU-Ultra KernelSU
-          
-          cd KernelSU
-          git fetch origin main
-          git checkout main
-          
-          # 强制删除 sucompat 文件（即使仓库里有也删）
-          rm -f kernel/sucompat.c kernel/sucompat.h || true
-          
-          # 彻底清理所有 sucompat 相关引用（包括 app_profile.c）
-          find . -type f -name "*.c" -o -name "*.h" | xargs sed -i '/sucompat/d' || true
-          find . -type f -name "*.c" -o -name "*.h" | xargs sed -i '/SUCOMPAT/d' || true
-          find . -type f -name "*.c" -o -name "*.h" | xargs sed -i '/#include "sucompat.h"/d' || true
-          find . -type f -name "*.c" -o -name "*.h" | xargs sed -i '/#define SUCOMPAT/d' || true
-          
-          # 针对 app_profile.c 额外处理 filter_count（万一没删干净）
-          if [ -f kernel/drivers/kernelsu/app_profile.c ]; then
-            sed -i '/filter_count/d' kernel/drivers/kernelsu/app_profile.c
-            sed -i '/seccomp\.filter_count/d' kernel/drivers/kernelsu/app_profile.c
+    
+          # 先检查 kernelsu 是否存在（调试用）
+          if [ ! -d "drivers/kernelsu" ]; then
+            echo "错误：drivers/kernelsu 不存在！请确认已 push 集成好的 SukiSU"
+            ls -la drivers/
+            exit 1
           fi
           
-          cd ..
+          # 确认 app_profile.c 存在并已改（可选调试）
+          if [ -f "drivers/kernelsu/app_profile.c" ]; then
+            echo "找到 app_profile.c，检查 filter_count 是否已禁用："
+            grep -i "filter_count" drivers/kernelsu/app_profile.c || echo "未找到 filter_count 关键字（已禁用或无此代码）"
+          else
+            echo "警告：drivers/kernelsu/app_profile.c 不存在，使用 SukiSU 标准结构？"
+            # 如果你的集成是 ln -s KernelSU/kernel drivers/kernelsu，这里补救
+            if [ -d "KernelSU/kernel" ]; then
+              ln -sf KernelSU/kernel drivers/kernelsu
+            fi
+          fi
           
-          # 链接和 Kconfig/Makefile 修改（保持不变）
-          ln -sf KernelSU/kernel/drivers/kernelsu drivers/kernelsu
-          echo "obj-\$(CONFIG_KSU) += kernelsu/" >> drivers/Makefile
-          echo "source \"drivers/kernelsu/Kconfig\"" >> drivers/Kconfig
+          # Kconfig & Makefile 确保添加（幂等，不会重复）
+          grep -q "kernelsu/" drivers/Makefile || echo "obj-\$(CONFIG_KSU) += kernelsu/" >> drivers/Makefile
+          grep -q "kernelsu/Kconfig" drivers/Kconfig || echo "source \"drivers/kernelsu/Kconfig\"" >> drivers/Kconfig
           
-          echo "正在修补 ksu.c..."
-          sed -i '/MODULE_IMPORT_NS/d' drivers/kernelsu/ksu.c
+          # 小修补（MODULE_IMPORT_NS 是新内核的，4.14 无需）
+          sed -i '/MODULE_IMPORT_NS/d' drivers/kernelsu/ksu.c || true
           
+          # allowlist.c 修补（如果存在）
           if [ -f drivers/kernelsu/allowlist.c ]; then
             sed -i 's/TWA_RESUME/true/g' drivers/kernelsu/allowlist.c
             sed -i 's/TWA_SIGNAL/true/g' drivers/kernelsu/allowlist.c
           fi
           
-          echo "SukiSU-Ultra 已手动集成（sucompat 已彻底禁用，所有文件清理完成）"
+          echo "SukiSU-Ultra 已确认集成，使用仓库中版本（filter_count 应已手动禁用）"
           
       - name: 修复 Kconfig 非法字符与换行符
         run: |
