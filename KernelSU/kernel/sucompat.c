@@ -2,7 +2,7 @@
 #include <linux/preempt.h>
 #include <linux/printk.h>
 #include <linux/mm.h>
-#include <linux/pgtable.h>
+#include <asm/pgtable.h>
 #include <linux/uaccess.h>
 #include <asm/current.h>
 #include <linux/cred.h>
