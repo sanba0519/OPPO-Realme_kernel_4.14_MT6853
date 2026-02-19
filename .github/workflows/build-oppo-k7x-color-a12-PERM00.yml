@@ -1,0 +1,151 @@
+name: Build OppoK7x (PERM00) (Color A12)（MT6853）
+
+on:
+  push:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 5'
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 构建编译内核环境
+        run: |
+          sudo apt-get update
+          sudo -E apt-get -y -qq install git make bc bison ccache openssl dos2unix zip kmod cpio flex libelf-dev curl libssl-dev libtfm-dev wget device-tree-compiler ca-certificates python3 python2 binutils binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi
+          mkdir -p $GITHUB_WORKSPACE/kernel_workspace
+      - name: 下载 Gcc编译器
+        run: |
+          cd $GITHUB_WORKSPACE/kernel_workspace
+          mkdir gcc64
+          wget -O gcc-aarch64.tar.gz https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/tags/android-12.1.0_r27.tar.gz
+          tar -C gcc64/ -zxvf gcc-aarch64.tar.gz
+          
+          mkdir gcc32
+          wget -O gcc-arm.tar.gz https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/+archive/refs/tags/android-12.1.0_r27.tar.gz
+          tar -C gcc32/ -zxvf gcc-arm.tar.gz
+      - name: 下载Clang编译器
+        run: |
+          cd $GITHUB_WORKSPACE/kernel_workspace
+          mkdir clang-aosp
+          git clone -q --depth=1 https://github.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-6443078 -b 10.0 clang-aosp
+      - name: 下载内核源码
+        run: |
+          cd $GITHUB_WORKSPACE/kernel_workspace
+          git clone https://github.com/sanba0519/android_kernel_4.14_MT6853_PERM00 android-kernel
+          cd android-kernel
+      - name: 手动集成 SukiSU-Ultra（最新版 + 4.14 全兼容补丁 + 强制禁用 sucompat）
+        run: |
+          cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
+          rm -rf KernelSU
+          git clone --depth=1 https://github.com/SukiSU-Ultra/SukiSU-Ultra KernelSU
+          
+          cd KernelSU
+          git fetch origin main
+          git checkout main
+          
+          # 强制删除 sucompat 文件（即使仓库里有也删）
+          rm -f kernel/sucompat.c kernel/sucompat.h || true
+          
+          # 彻底清理所有 sucompat 相关引用（包括 app_profile.c）
+          find . -type f -name "*.c" -o -name "*.h" | xargs sed -i '/sucompat/d' || true
+          find . -type f -name "*.c" -o -name "*.h" | xargs sed -i '/SUCOMPAT/d' || true
+          find . -type f -name "*.c" -o -name "*.h" | xargs sed -i '/#include "sucompat.h"/d' || true
+          find . -type f -name "*.c" -o -name "*.h" | xargs sed -i '/#define SUCOMPAT/d' || true
+          
+          # 针对 app_profile.c 额外处理 filter_count（万一没删干净）
+          if [ -f kernel/drivers/kernelsu/app_profile.c ]; then
+            sed -i '/filter_count/d' kernel/drivers/kernelsu/app_profile.c
+            sed -i '/seccomp\.filter_count/d' kernel/drivers/kernelsu/app_profile.c
+          fi
+          
+          cd ..
+          
+          # 链接和 Kconfig/Makefile 修改（保持不变）
+          ln -sf KernelSU/kernel/drivers/kernelsu drivers/kernelsu
+          echo "obj-\$(CONFIG_KSU) += kernelsu/" >> drivers/Makefile
+          echo "source \"drivers/kernelsu/Kconfig\"" >> drivers/Kconfig
+          
+          echo "正在修补 ksu.c..."
+          sed -i '/MODULE_IMPORT_NS/d' drivers/kernelsu/ksu.c
+          
+          if [ -f drivers/kernelsu/allowlist.c ]; then
+            sed -i 's/TWA_RESUME/true/g' drivers/kernelsu/allowlist.c
+            sed -i 's/TWA_SIGNAL/true/g' drivers/kernelsu/allowlist.c
+          fi
+          
+          echo "SukiSU-Ultra 已手动集成（sucompat 已彻底禁用，所有文件清理完成）"
+          
+      - name: 修复 Kconfig 非法字符与换行符
+        run: |
+          cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
+          echo "[+] 正在清理 Kconfig 中的非法回车符..."
+          find . -type f -name "Kconfig*" -exec sed -i 's/\r$//' {} +
+      - name: 生成并修正内核配置（非交互 + 4.14 保险配置）
+        run: |
+          cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
+          
+          make O=out ARCH=arm64 mt6853-ss_defconfig
+          
+          CONFIG_FILE="out/.config"
+          cp "$CONFIG_FILE" "$CONFIG_FILE.bak"
+          
+          cat << EOF >> "$CONFIG_FILE"
+          CONFIG_KSU=y
+          CONFIG_KPROBES=y
+          CONFIG_HAVE_KPROBES=y
+          CONFIG_KPROBE_EVENTS=y
+          CONFIG_MODULES=y
+          CONFIG_OVERLAY_FS=y
+          CONFIG_OVERLAY_FS_REDIRECT_DIR=y
+          CONFIG_MODULES_USE_ELF_RELA=y
+          EOF
+          
+          make O=out ARCH=arm64 olddefconfig
+          
+          echo "关键配置检查："
+          grep -E "CONFIG_KSU|CONFIG_KPROBES|CONFIG_MODULES|CONFIG_OVERLAY_FS" "$CONFIG_FILE"
+          
+      - name: 设置ccache缓存
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: build-kernel-mt6853-sukisu-${{ github.run_id }}
+          max-size: 2G
+
+      - name: 开始编译内核
+        run: |
+          cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
+          export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang-aosp/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc64/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc32/bin:$PATH
+          export KBUILD_BUILD_HOST=企鹅交流:722651738
+          export KBUILD_BUILD_USER=kuan-jsbsbxjxh66
+          
+          make -s O=out ARCH=arm64 mt6853-ss_defconfig
+          make -j12 CC="ccache clang" O=out ARCH=arm64 \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-android- \
+            CROSS_COMPILE_ARM32=arm-linux-androideabi- \
+            LD=ld.lld
+      - name: 制作Anykernel3卡刷包
+        run: |
+          cd $GITHUB_WORKSPACE/kernel_workspace
+          git clone https://github.com/osm0sis/AnyKernel3
+          sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel3/anykernel.sh
+          sed -i 's!block=/dev/block/platform/omap/omap_hsmmc.0/by-name/boot;!block=auto;!g' AnyKernel3/anykernel.sh
+          sed -i 's/is_slot_device=0;/is_slot_device=auto;/g' AnyKernel3/anykernel.sh
+          cp android-kernel/out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
+          rm -rf AnyKernel3/.git* AnyKernel3/README.md
+      - name: 上传 Anykernel3
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-mtk6853-kernel-Anykernel3
+          path: kernel_workspace/AnyKernel3/*
+
+      - name: 上传编译内核
+        uses: actions/upload-artifact@v4
+        with:
+          name: mtk6853-Image.gz
+          path: kernel_workspace/android-kernel/out/arch/arm64/boot/Image.gz
