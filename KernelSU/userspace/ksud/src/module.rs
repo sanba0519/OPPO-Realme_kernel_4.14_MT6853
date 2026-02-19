@@ -1,27 +1,38 @@
 #[allow(clippy::wildcard_imports)]
 use crate::utils::*;
 use crate::{
-    assets, defs, mount,
+    assets, defs, ksucalls, metamodule,
     restorecon::{restore_syscon, setsyscon},
     sepolicy,
 };
 
-use anyhow::{anyhow, bail, ensure, Context, Result};
+use anyhow::{Context, Result, anyhow, bail, ensure};
 use const_format::concatcp;
 use is_executable::is_executable;
 use java_properties::PropertiesIter;
-use log::{info, warn};
+use log::{debug, info, warn};
+#[cfg(all(target_os = "android", target_arch = "aarch64"))]
+use mlua::{Function, Lua, Result as LuaResult, Table};
+use regex_lite::Regex;
+
+#[cfg(all(target_os = "android", target_arch = "aarch64"))]
+use std::fs;
+use std::fs::{copy, rename};
 use std::{
     collections::HashMap,
     env::var as env_var,
-    fs::{remove_dir_all, remove_file, set_permissions, File, Permissions},
+    fs::{File, Permissions, canonicalize, remove_dir_all, set_permissions},
     io::Cursor,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::Command,
     str::FromStr,
+    time::Duration,
 };
-use zip_extensions::zip_extract_file_to_memory;
+use wait_timeout::ChildExt;
+use zip_extensions::inflate::zip_extract::zip_extract_file_to_memory;
 
+use crate::defs::{MODULE_DIR, MODULE_UPDATE_DIR, UPDATE_FILE_NAME};
+use crate::module::ModuleType::{Active, All};
 #[cfg(unix)]
 use std::os::unix::{prelude::PermissionsExt, process::CommandExt};
 
@@ -35,25 +46,53 @@ const INSTALL_MODULE_SCRIPT: &str = concatcp!(
     "\n"
 );
 
-fn exec_install_script(module_file: &str) -> Result<()> {
-    let realpath = std::fs::canonicalize(module_file)
-        .with_context(|| format!("realpath: {module_file} failed"))?;
+/// Validate module_id format and security
+/// Module ID must match: ^[a-zA-Z][a-zA-Z0-9._-]+$
+/// - Must start with a letter (a-zA-Z)
+/// - Followed by one or more alphanumeric, dot, underscore, or hyphen characters
+/// - Minimum length: 2 characters
+pub fn validate_module_id(module_id: &str) -> Result<()> {
+    let re = Regex::new(r"^[a-zA-Z][a-zA-Z0-9._-]+$")?;
+    if re.is_match(module_id) {
+        Ok(())
+    } else {
+        Err(anyhow!(
+            "Invalid module ID: '{module_id}'. Must match /^[a-zA-Z][a-zA-Z0-9._-]+$/"
+        ))
+    }
+}
 
-    let result = Command::new(assets::BUSYBOX_PATH)
-        .args(["sh", "-c", INSTALL_MODULE_SCRIPT])
-        .env("ASH_STANDALONE", "1")
-        .env(
+/// Get common environment variables for script execution
+pub fn get_common_script_envs() -> Vec<(&'static str, String)> {
+    vec![
+        ("ASH_STANDALONE", "1".to_string()),
+        ("KSU", "true".to_string()),
+        ("KSU_SUKISU", "true".to_string()),
+        ("KSU_KERNEL_VER_CODE", ksucalls::get_version().to_string()),
+        ("KSU_VER_CODE", defs::VERSION_CODE.to_string()),
+        ("KSU_VER", defs::VERSION_NAME.to_string()),
+        (
             "PATH",
             format!(
                 "{}:{}",
-                env_var("PATH").unwrap(),
+                env_var("PATH").unwrap_or_default(),
                 defs::BINARY_DIR.trim_end_matches('/')
             ),
-        )
-        .env("KSU", "true")
-        .env("KSU_KERNEL_VER_CODE", crate::ksu::get_version().to_string())
-        .env("KSU_VER", defs::VERSION_NAME)
-        .env("KSU_VER_CODE", defs::VERSION_CODE)
+        ),
+    ]
+}
+
+fn exec_install_script(module_file: &str, is_metamodule: bool) -> Result<()> {
+    let realpath = std::fs::canonicalize(module_file)
+        .with_context(|| format!("realpath: {module_file} failed"))?;
+
+    // Get install script from metamodule module
+    let install_script =
+        metamodule::get_install_script(is_metamodule, INSTALLER_CONTENT, INSTALL_MODULE_SCRIPT)?;
+
+    let result = Command::new(assets::BUSYBOX_PATH)
+        .args(["sh", "-c", &install_script])
+        .envs(get_common_script_envs())
         .env("OUTFD", "1")
         .env("ZIPFILE", realpath)
         .status()?;
@@ -61,10 +100,7 @@ fn exec_install_script(module_file: &str) -> Result<()> {
     Ok(())
 }
 
-// becuase we use something like A-B update
-// we need to update the module state after the boot_completed
-// if someone(such as the module) install a module before the boot_completed
-// then it may cause some problems, just forbid it
+// Check if Android boot is completed before installing modules
 fn ensure_boot_completed() -> Result<()> {
     // ensure getprop sys.boot_completed == 1
     if getprop("sys.boot_completed").as_deref() != Some("1") {
@@ -73,24 +109,22 @@ fn ensure_boot_completed() -> Result<()> {
     Ok(())
 }
 
-fn mark_update() -> Result<()> {
-    ensure_file_exists(concatcp!(defs::WORKING_DIR, defs::UPDATE_FILE_NAME))
+#[derive(PartialEq, Eq)]
+pub enum ModuleType {
+    All,
+    Active,
+    Updated,
 }
 
-fn mark_module_state(module: &str, flag_file: &str, create_or_delete: bool) -> Result<()> {
-    let module_state_file = Path::new(defs::MODULE_DIR).join(module).join(flag_file);
-    if create_or_delete {
-        ensure_file_exists(module_state_file)
-    } else {
-        if module_state_file.exists() {
-            std::fs::remove_file(module_state_file)?;
-        }
-        Ok(())
-    }
-}
-
-fn foreach_module(active_only: bool, mut f: impl FnMut(&Path) -> Result<()>) -> Result<()> {
-    let modules_dir = Path::new(defs::MODULE_DIR);
+#[allow(clippy::needless_pass_by_value)]
+pub fn foreach_module(
+    module_type: ModuleType,
+    mut f: impl FnMut(&Path) -> Result<()>,
+) -> Result<()> {
+    let modules_dir = Path::new(match module_type {
+        ModuleType::Updated => MODULE_UPDATE_DIR,
+        _ => defs::MODULE_DIR,
+    });
     let dir = std::fs::read_dir(modules_dir)?;
     for entry in dir.flatten() {
         let path = entry.path();
@@ -99,11 +133,11 @@ fn foreach_module(active_only: bool, mut f: impl FnMut(&Path) -> Result<()>) -> 
             continue;
         }
 
-        if active_only && path.join(defs::DISABLE_FILE_NAME).exists() {
+        if module_type == Active && path.join(defs::DISABLE_FILE_NAME).exists() {
             info!("{} is disabled, skip", path.display());
             continue;
         }
-        if active_only && path.join(defs::REMOVE_FILE_NAME).exists() {
+        if module_type == Active && path.join(defs::REMOVE_FILE_NAME).exists() {
             warn!("{} is removed, skip", path.display());
             continue;
         }
@@ -115,71 +149,7 @@ fn foreach_module(active_only: bool, mut f: impl FnMut(&Path) -> Result<()>) -> 
 }
 
 fn foreach_active_module(f: impl FnMut(&Path) -> Result<()>) -> Result<()> {
-    foreach_module(true, f)
-}
-
-fn get_minimal_image_size(img: &str) -> Result<u64> {
-    check_image(img)?;
-
-    let output = Command::new("resize2fs")
-        .args(["-P", img])
-        .stdout(Stdio::piped())
-        .output()?;
-
-    let output = String::from_utf8_lossy(&output.stdout);
-    println!("- {}", output.trim());
-    let regex = regex::Regex::new(r"filesystem: (\d+)")?;
-    let result = regex
-        .captures(&output)
-        .ok_or(anyhow::anyhow!("regex not match"))?;
-    let result = &result[1];
-    let result = u64::from_str(result)?;
-    Ok(result)
-}
-
-fn check_image(img: &str) -> Result<()> {
-    let result = Command::new("e2fsck")
-        .args(["-yf", img])
-        .stdout(Stdio::piped())
-        .status()
-        .with_context(|| format!("Failed to exec e2fsck {img}"))?;
-    let code = result.code();
-    // 0 or 1 is ok
-    // 0: no error
-    // 1: file system errors corrected
-    // https://man7.org/linux/man-pages/man8/e2fsck.8.html
-    // ensure!(
-    //     code == Some(0) || code == Some(1),
-    //     "Failed to check image, e2fsck exit code: {}",
-    //     code.unwrap_or(-1)
-    // );
-    info!("e2fsck exit code: {}", code.unwrap_or(-1));
-    Ok(())
-}
-
-fn grow_image_size(img: &str, extra_size: u64) -> Result<()> {
-    let minimal_size = get_minimal_image_size(img)?; // the minimal size is in KB
-    let target_size = minimal_size * 1024 + extra_size;
-
-    // check image
-    check_image(img)?;
-
-    println!(
-        "- Target image size: {}",
-        humansize::format_size(target_size, humansize::DECIMAL)
-    );
-    let target_size = target_size / 1024 + 1024;
-    info!("resize image to {target_size}K, minimal size is {minimal_size}K");
-    let result = Command::new("resize2fs")
-        .args([img, &format!("{target_size}K")])
-        .stdout(Stdio::piped())
-        .status()
-        .with_context(|| format!("Failed to exec resize2fs {img}"))?;
-    ensure!(result.success(), "Failed to resize2fs: {}", result);
-
-    check_image(img)?;
-
-    Ok(())
+    foreach_module(Active, f)
 }
 
 pub fn load_sepolicy_rule() -> Result<()> {
@@ -199,8 +169,45 @@ pub fn load_sepolicy_rule() -> Result<()> {
     Ok(())
 }
 
-fn exec_script<T: AsRef<Path>>(path: T, wait: bool) -> Result<()> {
+pub fn exec_script<T: AsRef<Path>>(path: T, wait: bool, timeout: Duration) -> Result<()> {
     info!("exec {}", path.as_ref().display());
+
+    let is_module_script = path.as_ref().starts_with(defs::MODULE_DIR);
+    // Extract module_id from path if it matches /data/adb/modules/{id}/...
+    let module_id = if is_module_script {
+        path.as_ref()
+            .strip_prefix(defs::MODULE_DIR)
+            .ok()
+            .and_then(|p| p.components().next())
+            .and_then(|c| c.as_os_str().to_str())
+            .map(ToString::to_string)
+    } else {
+        None
+    };
+
+    // Validate and log module_id extraction
+    let validated_module_id = module_id
+        .as_ref()
+        .and_then(|id| match validate_module_id(id) {
+            Ok(()) => {
+                debug!("Module ID extracted from script path: '{id}'");
+                Some(id.as_str())
+            }
+            Err(e) => {
+                warn!(
+                    "Invalid module ID '{id}' extracted from script path '{}': {e}",
+                    path.as_ref().display(),
+                );
+                None
+            }
+        });
+
+    if is_module_script && module_id.is_none() {
+        debug!(
+            "Failed to extract module_id from script path '{}'. Script will run without KSU_MODULE environment variable.",
+            path.as_ref().display()
+        );
+    }
 
     let mut command = &mut Command::new(assets::BUSYBOX_PATH);
     #[cfg(unix)]
@@ -218,36 +225,41 @@ fn exec_script<T: AsRef<Path>>(path: T, wait: bool) -> Result<()> {
         .current_dir(path.as_ref().parent().unwrap())
         .arg("sh")
         .arg(path.as_ref())
-        .env("ASH_STANDALONE", "1")
-        .env("KSU", "true")
-        .env("KSU_KERNEL_VER_CODE", crate::ksu::get_version().to_string())
-        .env("KSU_VER_CODE", defs::VERSION_CODE)
-        .env("KSU_VER", defs::VERSION_NAME)
-        .env(
-            "PATH",
-            format!(
-                "{}:{}",
-                env_var("PATH").unwrap(),
-                defs::BINARY_DIR.trim_end_matches('/')
-            ),
-        );
+        .envs(get_common_script_envs());
 
-    let result = if wait {
-        command.status().map(|_| ())
-    } else {
-        command.spawn().map(|_| ())
+    // Set KSU_MODULE environment variable if module_id was validated successfully
+    if let Some(id) = validated_module_id {
+        command = command.env("KSU_MODULE", id);
+    }
+
+    let result = {
+        if wait {
+            command.spawn()?.wait_timeout(timeout).map(|_| ())
+        } else {
+            command.spawn().map(|_| ())
+        }
     };
-    result.map_err(|err| anyhow!("Failed to exec {}: {}", path.as_ref().display(), err))
+    result.map_err(|e| anyhow!("Failed to exec {}: {e}", path.as_ref().display()))
 }
 
 pub fn exec_stage_script(stage: &str, block: bool) -> Result<()> {
+    let metamodule_dir = metamodule::get_metamodule_path().and_then(|path| canonicalize(path).ok());
+
     foreach_active_module(|module| {
+        if metamodule_dir.as_ref().is_some_and(|meta_dir| {
+            canonicalize(module)
+                .map(|resolved| resolved == *meta_dir)
+                .unwrap_or(false)
+        }) {
+            return Ok(());
+        }
+
         let script_path = module.join(format!("{stage}.sh"));
         if !script_path.exists() {
             return Ok(());
         }
 
-        exec_script(&script_path, block)
+        exec_script(&script_path, block, defs::EXEC_STAGE_TIMEOUT)
     })?;
 
     Ok(())
@@ -269,7 +281,151 @@ pub fn exec_common_scripts(dir: &str, wait: bool) -> Result<()> {
             continue;
         }
 
-        exec_script(path, wait)?;
+        exec_script(path, wait, defs::EXEC_STAGE_TIMEOUT)?;
+    }
+
+    Ok(())
+}
+
+#[cfg(all(target_os = "android", target_arch = "aarch64"))]
+pub fn save_text<P: AsRef<Path>>(filename: P, content: &str) -> std::io::Result<()> {
+    let _ = ensure_dir_exists("/data/adb/config");
+    let path = format!("/data/adb/config/{}", filename.as_ref().display());
+    fs::write(&path, content)
+}
+
+#[cfg(all(target_os = "android", target_arch = "aarch64"))]
+pub fn load_text<P: AsRef<Path>>(filename: P) -> std::io::Result<String> {
+    let _ = ensure_dir_exists("/data/adb/config");
+    let path = format!("/data/adb/config/{}", filename.as_ref().display());
+    fs::read_to_string(path)
+}
+
+#[cfg(all(target_os = "android", target_arch = "aarch64"))]
+pub fn load_all_lua_modules(lua: &Lua) -> LuaResult<()> {
+    let modules_dir = Path::new("/data/adb/modules");
+
+    let modules: Table = if let Ok(t) = lua.globals().get("modules") {
+        t
+    } else {
+        let t = lua.create_table()?;
+        lua.globals().set("modules", t.clone())?;
+        t
+    };
+
+    if modules_dir.exists() {
+        for entry in fs::read_dir(modules_dir)
+            .unwrap_or_else(|_| fs::read_dir("/dev/null").unwrap())
+            .flatten()
+        {
+            let path = entry.path();
+            if path.is_dir() {
+                let id = path.file_name().unwrap().to_string_lossy().to_string();
+                let package: Table = lua.globals().get("package")?;
+                let old_cpath: String = package.get("cpath")?;
+                let new_cpath = format!("{}/?.so;{old_cpath}", path.to_string_lossy());
+                package.set("cpath", new_cpath)?;
+
+                let lua_file = path.join(format!("{id}.lua"));
+
+                if lua_file.exists() {
+                    match fs::read_to_string(&lua_file) {
+                        Ok(code) => {
+                            match lua
+                                .load(&code)
+                                .set_name(&*lua_file.to_string_lossy())
+                                .eval::<Table>()
+                            {
+                                Ok(module) => {
+                                    modules.set(id.clone(), module.clone())?;
+                                }
+                                Err(e) => {
+                                    warn!("Failed to eval Lua {}: {}", lua_file.display(), e);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            warn!("Failed to read Lua {}: {e}", lua_file.display());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(all(target_os = "android", target_arch = "aarch64"))]
+pub fn info_lua(lua: &Lua) -> LuaResult<Function> {
+    lua.create_function(|_, msg: String| {
+        info!("[Lua] {msg}");
+        Ok(())
+    })
+}
+
+#[cfg(all(target_os = "android", target_arch = "aarch64"))]
+pub fn warn_lua(lua: &Lua) -> LuaResult<Function> {
+    lua.create_function(|_, msg: String| {
+        warn!("[Lua] {msg}");
+        Ok(())
+    })
+}
+
+#[cfg(all(target_os = "android", target_arch = "aarch64"))]
+pub fn install_module_lua(lua: &Lua) -> LuaResult<Function> {
+    lua.create_function(|_, zip: String| {
+        install_module(&zip)
+            .map_err(|e| mlua::Error::external(format!("install_module failed: {e}")))
+    })
+}
+
+#[cfg(all(target_os = "android", target_arch = "aarch64"))]
+pub fn save_text_lua(lua: &Lua) -> LuaResult<Function> {
+    lua.create_function(|_, (filename, content): (String, String)| {
+        save_text(&filename, &content)
+            .map_err(|e| mlua::Error::external(format!("save filed: {e}")))?;
+        Ok(())
+    })
+}
+
+#[cfg(all(target_os = "android", target_arch = "aarch64"))]
+pub fn read_text_lua(lua: &Lua) -> LuaResult<Function> {
+    lua.create_function(|_, filename: String| {
+        let content = match load_text(&filename) {
+            Ok(s) => s,
+            Err(ref e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(e) => return Err(mlua::Error::external(format!("read failed: {e}"))),
+        };
+        Ok(content)
+    })
+}
+
+#[cfg(all(target_os = "android", target_arch = "aarch64"))]
+pub fn run_lua(id: &str, function: &str, on_each_module: bool, _wait: bool) -> mlua::Result<()> {
+    let lua = unsafe { Lua::unsafe_new() };
+
+    let func = install_module_lua(&lua)?;
+    lua.globals().set("install_module", func)?;
+    lua.globals().set("info", info_lua(&lua)?)?;
+    lua.globals().set("warn", warn_lua(&lua)?)?;
+    lua.globals().set("setConfig", save_text_lua(&lua)?)?;
+    lua.globals().set("getConfig", read_text_lua(&lua)?)?;
+
+    load_all_lua_modules(&lua)?;
+
+    let modules: mlua::Table = lua.globals().get("modules")?;
+    if on_each_module {
+        for pair in modules.pairs::<String, mlua::Table>() {
+            let (_, module_table) = pair?;
+            if let Ok(func_obj) = module_table.get::<mlua::Function>(function) {
+                func_obj.call::<()>(id)?;
+            }
+        }
+    } else {
+        let module_table: mlua::Table = modules.get(id)?;
+        let func_obj: mlua::Function = module_table.get(function)?;
+        func_obj.call::<()>(())?;
     }
 
     Ok(())
@@ -298,45 +454,112 @@ pub fn load_system_prop() -> Result<()> {
 }
 
 pub fn prune_modules() -> Result<()> {
-    foreach_module(false, |module| {
-        remove_file(module.join(defs::UPDATE_FILE_NAME)).ok();
-
+    foreach_module(All, |module| {
         if !module.join(defs::REMOVE_FILE_NAME).exists() {
             return Ok(());
         }
 
         info!("remove module: {}", module.display());
 
-        let uninstaller = module.join("uninstall.sh");
-        if uninstaller.exists() {
-            if let Err(e) = exec_script(uninstaller, true) {
-                warn!("Failed to exec uninstaller: {}", e);
+        // Execute metamodule's metauninstall.sh first
+        let module_id = module.file_name().and_then(|n| n.to_str()).unwrap_or("");
+
+        // Check if this is a metamodule
+        let is_metamodule = read_module_prop(module)
+            .map(|props| metamodule::is_metamodule(&props))
+            .unwrap_or(false);
+
+        if is_metamodule {
+            info!("Removing metamodule symlink");
+            if let Err(e) = metamodule::remove_symlink() {
+                warn!("Failed to remove metamodule symlink: {e}");
             }
+        } else if let Err(e) = metamodule::exec_metauninstall_script(module_id) {
+            warn!("Failed to exec metamodule uninstall for {module_id}: {e}",);
         }
 
+        // Then execute module's own uninstall.sh
+        let uninstaller = module.join("uninstall.sh");
+        if uninstaller.exists()
+            && let Err(e) = exec_script(uninstaller, true, defs::EXEC_STAGE_TIMEOUT)
+        {
+            warn!("Failed to exec uninstaller: {e}");
+        }
+
+        // Clear module configs before removing module directory
+        if let Err(e) = crate::module_config::clear_module_configs(module_id) {
+            warn!("Failed to clear configs for {module_id}: {e}");
+        }
+
+        // Finally remove the module directory
         if let Err(e) = remove_dir_all(module) {
-            warn!("Failed to remove {}: {}", module.display(), e);
+            warn!("Failed to remove {}: {e}", module.display());
         }
 
         Ok(())
     })?;
 
+    // collect remaining modules, if none, clean up metamodule record
+    let remaining_modules: Vec<_> = std::fs::read_dir(defs::MODULE_DIR)?
+        .filter_map(std::result::Result::ok)
+        .filter(|entry| entry.path().join("module.prop").exists())
+        .collect();
+
+    if remaining_modules.is_empty() {
+        info!("no remaining modules.");
+    }
+
     Ok(())
 }
 
-fn _install_module(zip: &str) -> Result<()> {
+pub fn handle_updated_modules() -> Result<()> {
+    let modules_root = Path::new(MODULE_DIR);
+    foreach_module(ModuleType::Updated, |updated_module| {
+        if !updated_module.is_dir() {
+            return Ok(());
+        }
+
+        if let Some(name) = updated_module.file_name() {
+            let module_dir = modules_root.join(name);
+            let mut disabled = false;
+            let mut removed = false;
+            if module_dir.exists() {
+                // If the old module is disabled, we need to also disable the new one
+                disabled = module_dir.join(defs::DISABLE_FILE_NAME).exists();
+                removed = module_dir.join(defs::REMOVE_FILE_NAME).exists();
+                remove_dir_all(&module_dir)?;
+            }
+            rename(updated_module, &module_dir)?;
+            if removed {
+                let path = module_dir.join(defs::REMOVE_FILE_NAME);
+                if let Err(e) = ensure_file_exists(&path) {
+                    warn!("Failed to create {}: {e}", path.display());
+                }
+            } else if disabled {
+                let path = module_dir.join(defs::DISABLE_FILE_NAME);
+                if let Err(e) = ensure_file_exists(&path) {
+                    warn!("Failed to create {}: {e}", path.display());
+                }
+            }
+        }
+        Ok(())
+    })?;
+    Ok(())
+}
+
+fn install_module_to_system(zip: &str) -> Result<()> {
     ensure_boot_completed()?;
 
     // print banner
     println!(include_str!("banner"));
 
-    assets::ensure_binaries().with_context(|| "Failed to extract assets")?;
+    assets::ensure_binaries(false).with_context(|| "Failed to extract assets")?;
 
-    // first check if workding dir is usable
+    // first check if working dir is usable
     ensure_dir_exists(defs::WORKING_DIR).with_context(|| "Failed to create working dir")?;
     ensure_dir_exists(defs::BINARY_DIR).with_context(|| "Failed to create bin dir")?;
 
-    // read the module_id from zip, if faild if will return early.
+    // read the module_id from zip, if failed it will return early.
     let mut buffer: Vec<u8> = Vec::new();
     let entry_path = PathBuf::from_str("module.prop")?;
     let zip_path = PathBuf::from_str(zip)?;
@@ -344,297 +567,330 @@ fn _install_module(zip: &str) -> Result<()> {
     zip_extract_file_to_memory(&zip_path, &entry_path, &mut buffer)?;
 
     let mut module_prop = HashMap::new();
-    PropertiesIter::new_with_encoding(Cursor::new(buffer), encoding::all::UTF_8).read_into(
+    PropertiesIter::new_with_encoding(Cursor::new(buffer), encoding_rs::UTF_8).read_into(
         |k, v| {
             module_prop.insert(k, v);
         },
     )?;
-    info!("module prop: {:?}", module_prop);
+    info!("module prop: {module_prop:?}");
 
     let Some(module_id) = module_prop.get("id") else {
         bail!("module id not found in module.prop!");
     };
+    let module_id = module_id.trim();
 
-    let modules_img = Path::new(defs::MODULE_IMG);
-    let modules_update_img = Path::new(defs::MODULE_UPDATE_IMG);
-    let module_update_tmp_dir = defs::MODULE_UPDATE_TMP_DIR;
+    // Validate module_id format
+    validate_module_id(module_id)
+        .with_context(|| format!("Invalid module ID in module.prop: '{module_id}'"))?;
 
-    let modules_img_exist = modules_img.exists();
-    let modules_update_img_exist = modules_update_img.exists();
+    // Check if this module is a metamodule
+    let is_metamodule = metamodule::is_metamodule(&module_prop);
 
-    // prepare the tmp module img
-    let tmp_module_img = defs::MODULE_UPDATE_TMP_IMG;
-    let tmp_module_path = Path::new(tmp_module_img);
-    if tmp_module_path.exists() {
-        std::fs::remove_file(tmp_module_path)?;
+    // Check if it's safe to install regular module
+    if !is_metamodule && let Err(is_disabled) = metamodule::check_install_safety() {
+        println!("\n❌ Installation Blocked");
+        println!("┌────────────────────────────────");
+        println!("│ A metamodule with custom installer is active");
+        println!("│");
+        if is_disabled {
+            println!("│ Current state: Disabled");
+            println!("│ Action required: Re-enable or uninstall it, then reboot");
+        } else {
+            println!("│ Current state: Pending changes");
+            println!("│ Action required: Reboot to apply changes first");
+        }
+        println!("└─────────────────────────────────\n");
+        bail!("Metamodule installation blocked");
     }
 
-    let default_reserve_size = 256 * 1024 * 1024;
-    let zip_uncompressed_size = get_zip_uncompressed_size(zip)?;
-    let grow_size = default_reserve_size + zip_uncompressed_size;
+    // All modules (including metamodules) are installed to MODULE_UPDATE_DIR
+    let updated_dir = Path::new(defs::MODULE_UPDATE_DIR).join(module_id);
 
+    if is_metamodule {
+        info!("Installing metamodule: {module_id}");
+
+        // Check if there's already a metamodule installed
+        if metamodule::has_metamodule()
+            && let Some(existing_path) = metamodule::get_metamodule_path()
+        {
+            let existing_id = read_module_prop(&existing_path)
+                .ok()
+                .and_then(|m| m.get("id").cloned())
+                .unwrap_or_else(|| "unknown".to_string());
+
+            if existing_id != module_id {
+                println!("\n❌ Installation Failed");
+                println!("┌────────────────────────────────");
+                println!("│ A metamodule is already installed");
+                println!("│   Current metamodule: {existing_id}");
+                println!("│");
+                println!("│ Only one metamodule can be active at a time.");
+                println!("│");
+                println!("│ To install this metamodule:");
+                println!("│   1. Uninstall the current metamodule");
+                println!("│   2. Reboot your device");
+                println!("│   3. Install the new metamodule");
+                println!("└─────────────────────────────────\n");
+                bail!("Cannot install multiple metamodules");
+            }
+        }
+    }
+
+    let zip_uncompressed_size = get_zip_uncompressed_size(zip)?;
     info!(
         "zip uncompressed size: {}",
         humansize::format_size(zip_uncompressed_size, humansize::DECIMAL)
     );
-    info!(
-        "grow size: {}",
-        humansize::format_size(grow_size, humansize::DECIMAL)
-    );
-
-    println!("- Preparing image");
     println!(
         "- Module size: {}",
         humansize::format_size(zip_uncompressed_size, humansize::DECIMAL)
     );
 
-    if !modules_img_exist && !modules_update_img_exist {
-        // if no modules and modules_update, it is brand new installation, we should create a new img
-        // create a tmp module img and mount it to modules_update
-        info!("Creating brand new module image");
-        File::create(tmp_module_img)
-            .context("Failed to create ext4 image file")?
-            .set_len(grow_size)
-            .context("Failed to extend ext4 image")?;
+    // Ensure module directory exists and set SELinux context
+    ensure_dir_exists(defs::MODULE_UPDATE_DIR)?;
+    setsyscon(defs::MODULE_UPDATE_DIR)?;
 
-        // format the img to ext4 filesystem
-        let result = Command::new("mkfs.ext4")
-            .arg("-b")
-            .arg("1024")
-            .arg(tmp_module_img)
-            .stdout(Stdio::piped())
-            .output()?;
-        ensure!(
-            result.status.success(),
-            "Failed to format ext4 image: {}",
-            String::from_utf8(result.stderr).unwrap()
-        );
+    // Prepare target directory
+    println!("- Installing to {}", updated_dir.display());
+    ensure_clean_dir(&updated_dir)?;
+    info!("target dir: {}", updated_dir.display());
 
-        check_image(tmp_module_img)?;
-    } else if modules_update_img_exist {
-        // modules_update.img exists, we should use it as tmp img
-        info!("Using existing modules_update.img as tmp image");
-        std::fs::copy(modules_update_img, tmp_module_img).with_context(|| {
-            format!(
-                "Failed to copy {} to {}",
-                modules_update_img.display(),
-                tmp_module_img
-            )
-        })?;
-        // grow size of the tmp image
-        grow_image_size(tmp_module_img, grow_size)?;
-    } else {
-        // modules.img exists, we should use it as tmp img
-        info!("Using existing modules.img as tmp image");
-        std::fs::copy(modules_img, tmp_module_img).with_context(|| {
-            format!(
-                "Failed to copy {} to {}",
-                modules_img.display(),
-                tmp_module_img
-            )
-        })?;
-        // grow size of the tmp image
-        grow_image_size(tmp_module_img, grow_size)?;
-    }
-
-    // ensure modules_update exists
-    ensure_clean_dir(module_update_tmp_dir)?;
-
-    // mount the modules_update.img to mountpoint
-    println!("- Mounting image");
-
-    let _dontdrop = mount::AutoMountExt4::try_new(tmp_module_img, module_update_tmp_dir, true)?;
-
-    info!("mounted {} to {}", tmp_module_img, module_update_tmp_dir);
-
-    setsyscon(module_update_tmp_dir)?;
-
-    let module_dir = format!("{module_update_tmp_dir}/{module_id}");
-    ensure_clean_dir(&module_dir)?;
-    info!("module dir: {}", module_dir);
-
-    // unzip the image and move it to modules_update/<id> dir
+    // Extract zip to target directory
+    println!("- Extracting module files");
     let file = File::open(zip)?;
     let mut archive = zip::ZipArchive::new(file)?;
-    archive.extract(&module_dir)?;
+    archive.extract(&updated_dir)?;
 
-    // set permission and selinux context for $MOD/system
-    let module_system_dir = PathBuf::from(module_dir).join("system");
+    // Set permission and selinux context for $MOD/system
+    let module_system_dir = updated_dir.join("system");
     if module_system_dir.exists() {
         #[cfg(unix)]
         set_permissions(&module_system_dir, Permissions::from_mode(0o755))?;
         restore_syscon(&module_system_dir)?;
     }
 
-    exec_install_script(zip)?;
+    // Execute install script
+    println!("- Running module installer");
+    exec_install_script(zip, is_metamodule)?;
 
-    info!("rename {tmp_module_img} to {}", defs::MODULE_UPDATE_IMG);
-    // all done, rename the tmp image to modules_update.img
-    if std::fs::rename(tmp_module_img, defs::MODULE_UPDATE_IMG).is_err() {
-        warn!("Rename image failed, try copy it.");
-        std::fs::copy(tmp_module_img, defs::MODULE_UPDATE_IMG)
-            .with_context(|| "Failed to copy image.".to_string())?;
-        let _ = std::fs::remove_file(tmp_module_img);
+    let module_dir = Path::new(MODULE_DIR).join(module_id);
+    ensure_dir_exists(&module_dir)?;
+    copy(
+        updated_dir.join("module.prop"),
+        module_dir.join("module.prop"),
+    )?;
+    ensure_file_exists(module_dir.join(UPDATE_FILE_NAME))?;
+
+    // Create symlink for metamodule
+    if is_metamodule {
+        println!("- Creating metamodule symlink");
+        metamodule::ensure_symlink(&module_dir)?;
     }
 
-    mark_update()?;
-
-    info!("Module install successfully!");
+    println!("- Module installed successfully!");
+    info!("Module {module_id} installed successfully!");
 
     Ok(())
 }
 
 pub fn install_module(zip: &str) -> Result<()> {
-    let result = _install_module(zip);
+    let result = install_module_to_system(zip);
     if let Err(ref e) = result {
-        // error happened, do some cleanup!
-        let _ = std::fs::remove_file(defs::MODULE_UPDATE_TMP_IMG);
-        let _ = mount::umount_dir(defs::MODULE_UPDATE_TMP_DIR);
         println!("- Error: {e}");
     }
     result
 }
 
-fn update_module<F>(update_dir: &str, id: &str, func: F) -> Result<()>
-where
-    F: Fn(&str, &str) -> Result<()>,
-{
-    ensure_boot_completed()?;
+pub fn undo_uninstall_module(id: &str) -> Result<()> {
+    validate_module_id(id)?;
 
-    let modules_img = Path::new(defs::MODULE_IMG);
-    let modules_update_img = Path::new(defs::MODULE_UPDATE_IMG);
-    let modules_update_tmp_img = Path::new(defs::MODULE_UPDATE_TMP_IMG);
-    if !modules_update_img.exists() && !modules_img.exists() {
-        bail!("Please install module first!");
-    } else if modules_update_img.exists() {
-        info!(
-            "copy {} to {}",
-            modules_update_img.display(),
-            modules_update_tmp_img.display()
-        );
-        std::fs::copy(modules_update_img, modules_update_tmp_img)?;
-    } else {
-        info!(
-            "copy {} to {}",
-            modules_img.display(),
-            modules_update_tmp_img.display()
-        );
-        std::fs::copy(modules_img, modules_update_tmp_img)?;
+    let module_path = Path::new(defs::MODULE_DIR).join(id);
+    ensure!(module_path.exists(), "Module {id} not found");
+
+    // Remove the remove mark
+    let remove_file = module_path.join(defs::REMOVE_FILE_NAME);
+    if remove_file.exists() {
+        std::fs::remove_file(&remove_file)
+            .with_context(|| format!("Failed to delete remove file for module '{id}'"))?;
+        info!("Removed the remove mark for module {id}");
     }
-
-    // ensure modules_update dir exist
-    ensure_clean_dir(update_dir)?;
-
-    // mount the modules_update img
-    let _dontdrop = mount::AutoMountExt4::try_new(defs::MODULE_UPDATE_TMP_IMG, update_dir, true)?;
-
-    // call the operation func
-    let result = func(id, update_dir);
-
-    if let Err(e) = std::fs::rename(modules_update_tmp_img, defs::MODULE_UPDATE_IMG) {
-        warn!("Rename image failed: {e}, try copy it.");
-        std::fs::copy(modules_update_tmp_img, defs::MODULE_UPDATE_IMG)
-            .with_context(|| "Failed to copy image.".to_string())?;
-        let _ = std::fs::remove_file(modules_update_tmp_img);
-    }
-
-    mark_update()?;
-
-    result
-}
-
-pub fn uninstall_module(id: &str) -> Result<()> {
-    update_module(defs::MODULE_UPDATE_TMP_DIR, id, |mid, update_dir| {
-        let dir = Path::new(update_dir);
-        ensure!(dir.exists(), "No module installed");
-
-        // iterate the modules_update dir, find the module to be removed
-        let dir = std::fs::read_dir(dir)?;
-        for entry in dir.flatten() {
-            let path = entry.path();
-            let module_prop = path.join("module.prop");
-            if !module_prop.exists() {
-                continue;
-            }
-            let content = std::fs::read(module_prop)?;
-            let mut module_id: String = String::new();
-            PropertiesIter::new_with_encoding(Cursor::new(content), encoding::all::UTF_8)
-                .read_into(|k, v| {
-                    if k.eq("id") {
-                        module_id = v;
-                    }
-                })?;
-            if module_id.eq(mid) {
-                let remove_file = path.join(defs::REMOVE_FILE_NAME);
-                File::create(remove_file).with_context(|| "Failed to create remove file.")?;
-                break;
-            }
-        }
-
-        // santity check
-        let target_module_path = format!("{update_dir}/{mid}");
-        let target_module = Path::new(&target_module_path);
-        if target_module.exists() {
-            let remove_file = target_module.join(defs::REMOVE_FILE_NAME);
-            if !remove_file.exists() {
-                File::create(remove_file).with_context(|| "Failed to create remove file.")?;
-            }
-        }
-
-        let _ = mark_module_state(id, defs::REMOVE_FILE_NAME, true);
-
-        Ok(())
-    })
-}
-
-fn _enable_module(module_dir: &str, mid: &str, enable: bool) -> Result<()> {
-    let src_module_path = format!("{module_dir}/{mid}");
-    let src_module = Path::new(&src_module_path);
-    ensure!(src_module.exists(), "module: {} not found!", mid);
-
-    let disable_path = src_module.join(defs::DISABLE_FILE_NAME);
-    if enable {
-        if disable_path.exists() {
-            std::fs::remove_file(&disable_path).with_context(|| {
-                format!("Failed to remove disable file: {}", &disable_path.display())
-            })?;
-        }
-    } else {
-        ensure_file_exists(disable_path)?;
-    }
-
-    let _ = mark_module_state(mid, defs::DISABLE_FILE_NAME, !enable);
 
     Ok(())
 }
 
+pub fn uninstall_module(id: &str) -> Result<()> {
+    validate_module_id(id)?;
+
+    let module_path = Path::new(defs::MODULE_DIR).join(id);
+    ensure!(module_path.exists(), "Module {id} not found");
+
+    // Mark for removal
+    let remove_file = module_path.join(defs::REMOVE_FILE_NAME);
+    File::create(remove_file).with_context(|| "Failed to create remove file")?;
+
+    info!("Module {id} marked for removal");
+
+    Ok(())
+}
+
+#[cfg(all(target_os = "android", target_arch = "aarch64"))]
+pub fn exec_stage_lua(stage: &str, wait: bool, superkey: &str) -> Result<()> {
+    let stage_safe = stage.replace('-', "_");
+    run_lua(superkey, &stage_safe, true, wait).map_err(|e| anyhow::anyhow!("{e}"))?;
+    Ok(())
+}
+
+pub fn run_action(id: &str) -> Result<()> {
+    validate_module_id(id)?;
+
+    let action_script_path = format!("/data/adb/modules/{id}/action.sh");
+    #[cfg(all(target_os = "android", target_arch = "aarch64"))]
+    {
+        if Path::new(&action_script_path).exists() {
+            exec_script(&action_script_path, true, defs::EXEC_STAGE_TIMEOUT)
+        } else {
+            //if no action.sh, try to run lua action
+            run_lua(id, "action", false, true).map_err(|e| anyhow::anyhow!("{e}"))
+        }
+    }
+
+    #[cfg(not(all(target_os = "android", target_arch = "aarch64")))]
+    exec_script(&action_script_path, true, defs::EXEC_STAGE_TIMEOUT)
+}
+
 pub fn enable_module(id: &str) -> Result<()> {
-    update_module(defs::MODULE_UPDATE_TMP_DIR, id, |mid, update_dir| {
-        _enable_module(update_dir, mid, true)
-    })
+    validate_module_id(id)?;
+
+    let module_path = Path::new(defs::MODULE_DIR).join(id);
+    ensure!(module_path.exists(), "Module {id} not found");
+
+    let disable_path = module_path.join(defs::DISABLE_FILE_NAME);
+    if disable_path.exists() {
+        std::fs::remove_file(&disable_path).with_context(|| {
+            format!("Failed to remove disable file: {}", disable_path.display())
+        })?;
+        info!("Module {id} enabled");
+    }
+
+    Ok(())
 }
 
 pub fn disable_module(id: &str) -> Result<()> {
-    update_module(defs::MODULE_UPDATE_TMP_DIR, id, |mid, update_dir| {
-        _enable_module(update_dir, mid, false)
-    })
+    let module_path = Path::new(defs::MODULE_DIR).join(id);
+    ensure!(module_path.exists(), "Module {id} not found");
+
+    let disable_path = module_path.join(defs::DISABLE_FILE_NAME);
+    ensure_file_exists(disable_path)?;
+
+    info!("Module {id} disabled");
+
+    Ok(())
 }
 
 pub fn disable_all_modules() -> Result<()> {
+    mark_all_modules(defs::DISABLE_FILE_NAME)
+}
+
+pub fn uninstall_all_modules() -> Result<()> {
+    info!("Uninstalling all modules");
+    mark_all_modules(defs::REMOVE_FILE_NAME)
+}
+
+fn mark_all_modules(flag_file: &str) -> Result<()> {
     // we assume the module dir is already mounted
     let dir = std::fs::read_dir(defs::MODULE_DIR)?;
     for entry in dir.flatten() {
         let path = entry.path();
-        let disable_flag = path.join(defs::DISABLE_FILE_NAME);
-        if let Err(e) = ensure_file_exists(disable_flag) {
-            warn!("Failed to disable module: {}: {}", path.display(), e);
+        let flag = path.join(flag_file);
+        if let Err(e) = ensure_file_exists(flag) {
+            warn!("Failed to mark module: {}: {e}", path.display());
         }
     }
 
     Ok(())
 }
 
-fn _list_modules(path: &str) -> Vec<HashMap<String, String>> {
+/// Read module.prop from the given module path and return as a HashMap
+pub fn read_module_prop(module_path: &Path) -> Result<HashMap<String, String>> {
+    let module_prop = module_path.join("module.prop");
+    ensure!(
+        module_prop.exists(),
+        "module.prop not found in {}",
+        module_path.display()
+    );
+
+    let content = std::fs::read(&module_prop)
+        .with_context(|| format!("Failed to read module.prop: {}", module_prop.display()))?;
+
+    let mut prop_map: HashMap<String, String> = HashMap::new();
+    PropertiesIter::new_with_encoding(Cursor::new(content), encoding_rs::UTF_8)
+        .read_into(|k, v| {
+            prop_map.insert(k, v);
+        })
+        .with_context(|| format!("Failed to parse module.prop: {}", module_prop.display()))?;
+
+    Ok(prop_map)
+}
+
+/// Resolve a module icon path to an absolute on-disk path
+fn resolve_module_icon_path(
+    module_prop_map: &mut HashMap<String, String>,
+    key: &str,
+    module_path: &Path,
+) {
+    if let Some(icon_value) = module_prop_map.get(key) {
+        let icon_value = icon_value.trim();
+        if icon_value.is_empty() {
+            return;
+        }
+        let path = std::path::Path::new(icon_value);
+        if path.is_absolute() {
+            log::warn!(
+                "Rejected {} with absolute path for module {}: {}",
+                key,
+                module_prop_map.get("id").map_or("", String::as_str),
+                icon_value
+            );
+            return;
+        }
+        let has_parent = path
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir));
+        if has_parent {
+            log::warn!(
+                "Rejected {} with parent traversal for module {}: {}",
+                key,
+                module_prop_map.get("id").map_or("", String::as_str),
+                icon_value
+            );
+            return;
+        }
+        let candidate = module_path.join(path);
+        if candidate.exists() && candidate.is_file() {
+            if let Some(s) = candidate.to_str() {
+                module_prop_map.insert(key.to_owned(), s.to_string());
+            }
+        } else {
+            log::debug!(
+                "{} not found for module {}: {}",
+                key,
+                module_prop_map.get("id").map_or("", String::as_str),
+                candidate.display()
+            );
+        }
+    }
+}
+
+fn list_module(path: &str) -> Vec<HashMap<String, String>> {
+    // Load all module configs once to minimize I/O overhead
+    let all_configs = match crate::module_config::get_all_module_configs() {
+        Ok(configs) => configs,
+        Err(e) => {
+            warn!("Failed to load module configs: {e}");
+            HashMap::new()
+        }
+    };
+
     // first check enabled modules
     let dir = std::fs::read_dir(path);
     let Ok(dir) = dir else {
@@ -646,45 +902,75 @@ fn _list_modules(path: &str) -> Vec<HashMap<String, String>> {
     for entry in dir.flatten() {
         let path = entry.path();
         info!("path: {}", path.display());
-        let module_prop = path.join("module.prop");
-        if !module_prop.exists() {
+
+        if !path.join("module.prop").exists() {
             continue;
         }
-        let content = std::fs::read(&module_prop);
-        let Ok(content) = content else {
-            warn!("Failed to read file: {}", module_prop.display());
-            continue;
-        };
-        let mut module_prop_map: HashMap<String, String> = HashMap::new();
-        let encoding = encoding::all::UTF_8;
-        let result =
-            PropertiesIter::new_with_encoding(Cursor::new(content), encoding).read_into(|k, v| {
-                module_prop_map.insert(k, v);
-            });
 
-        if module_prop_map["id"].is_empty() {
+        let mut module_prop_map = match read_module_prop(&path) {
+            Ok(prop) => prop,
+            Err(e) => {
+                warn!("Failed to read module.prop for {}: {e}", path.display());
+                continue;
+            }
+        };
+
+        // If id is missing or empty, use directory name as fallback
+        if !module_prop_map.contains_key("id") || module_prop_map["id"].is_empty() {
             if let Some(id) = entry.file_name().to_str() {
-                info!("Use dir name as module id: {}", id);
+                info!("Use dir name as module id: {id}");
                 module_prop_map.insert("id".to_owned(), id.to_owned());
             } else {
-                info!("Failed to get module id: {:?}", module_prop);
+                info!("Failed to get module id from dir name");
                 continue;
             }
         }
 
-        // Add enabled, update, remove flags
+        // Add enabled, update, remove, web, action flags
         let enabled = !path.join(defs::DISABLE_FILE_NAME).exists();
         let update = path.join(defs::UPDATE_FILE_NAME).exists();
         let remove = path.join(defs::REMOVE_FILE_NAME).exists();
+        let web = path.join(defs::MODULE_WEB_DIR).exists();
+        let action = path.join(defs::MODULE_ACTION_SH).exists();
+        let need_mount = path.join("system").exists() && !path.join("skip_mount").exists();
 
         module_prop_map.insert("enabled".to_owned(), enabled.to_string());
         module_prop_map.insert("update".to_owned(), update.to_string());
         module_prop_map.insert("remove".to_owned(), remove.to_string());
+        module_prop_map.insert("web".to_owned(), web.to_string());
+        module_prop_map.insert("action".to_owned(), action.to_string());
+        module_prop_map.insert("mount".to_owned(), need_mount.to_string());
 
-        if result.is_err() {
-            warn!("Failed to parse module.prop: {}", module_prop.display());
-            continue;
+        resolve_module_icon_path(&mut module_prop_map, "actionIcon", &path);
+        resolve_module_icon_path(&mut module_prop_map, "webuiIcon", &path);
+
+        // Apply module config overrides and extract managed features
+        if let Some(module_id) = module_prop_map.get("id")
+            && let Some(config) = all_configs.get(module_id.as_str())
+        {
+            // Apply override.description
+            if let Some(desc) = config.get("override.description") {
+                module_prop_map.insert("description".to_owned(), desc.clone());
+            }
+
+            // Extract managed features from manage.* config entries
+            let managed_features: Vec<String> = config
+                .iter()
+                .filter_map(|(k, v)| {
+                    if k.starts_with("manage.") && crate::module_config::parse_bool_config(v) {
+                        k.strip_prefix("manage.")
+                            .map(std::string::ToString::to_string)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            if !managed_features.is_empty() {
+                module_prop_map.insert("managedFeatures".to_owned(), managed_features.join(","));
+            }
         }
+
         modules.push(module_prop_map);
     }
 
@@ -692,7 +978,55 @@ fn _list_modules(path: &str) -> Vec<HashMap<String, String>> {
 }
 
 pub fn list_modules() -> Result<()> {
-    let modules = _list_modules(defs::MODULE_DIR);
+    let modules = list_module(defs::MODULE_DIR);
     println!("{}", serde_json::to_string_pretty(&modules)?);
     Ok(())
+}
+
+/// Get all managed features from active modules
+/// Modules declare managed features via config system (manage.<feature>=true)
+/// Returns: HashMap<ModuleId, Vec<ManagedFeature>>
+pub fn get_managed_features() -> Result<HashMap<String, Vec<String>>> {
+    let mut managed_features_map: HashMap<String, Vec<String>> = HashMap::new();
+
+    foreach_active_module(|module_path| {
+        // Get module ID
+        let Some(module_id) = module_path.file_name().and_then(|n| n.to_str()) else {
+            warn!(
+                "Failed to get module id from path: {}",
+                module_path.display()
+            );
+            return Ok(());
+        };
+
+        // Read module config
+        let config = match crate::module_config::merge_configs(module_id) {
+            Ok(c) => c,
+            Err(e) => {
+                warn!("Failed to merge configs for module '{module_id}': {e}");
+                return Ok(()); // Skip this module
+            }
+        };
+
+        // Extract manage.* config entries
+        let mut feature_list = Vec::new();
+        for (key, value) in &config {
+            if key.starts_with("manage.") {
+                // Parse feature name
+                if let Some(feature_name) = key.strip_prefix("manage.")
+                    && crate::module_config::parse_bool_config(value)
+                {
+                    feature_list.push(feature_name.to_string());
+                }
+            }
+        }
+
+        if !feature_list.is_empty() {
+            managed_features_map.insert(module_id.to_string(), feature_list);
+        }
+
+        Ok(())
+    })?;
+
+    Ok(managed_features_map)
 }

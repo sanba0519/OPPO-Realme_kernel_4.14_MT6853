@@ -9,7 +9,7 @@
     <string name="profile_selinux_context">SELinux kontekst</string>
     <string name="profile_umount_modules">Umount module</string>
     <string name="failed_to_update_app_profile">Ažuriranje Profila Aplikacije za %s nije uspjelo</string>
-    <string name="require_kernel_version">Trenutna KernelSU verzija %d je preniska da bi upravitelj ispravno radio. Molimo vas da nadogradite na verziju %d ili noviju!</string>
+    <string name="require_kernel_version">Trenutna KernelSU verzija %1$d je preniska da bi upravitelj ispravno radio. Molimo vas da nadogradite na verziju %2$d ili noviju!</string>
     <string name="settings_umount_modules_default">Umount module po zadanom</string>
     <string name="settings_umount_modules_default_summary">Globalna zadana vrijednost za \"Umount module\" u Profilima Aplikacije. Ako je omogućeno, uklonit će sve izmjene modula na sistemu za aplikacije koje nemaju postavljen Profil.</string>
     <string name="profile_umount_modules_summary">Uključivanjem ove opcije omogućit će KernelSU-u da vrati sve izmjenute datoteke od strane modula za ovu aplikaciju.</string>
@@ -24,8 +24,6 @@
     <string name="home">Početna</string>
     <string name="home_not_installed">Nije instalirano</string>
     <string name="home_click_to_install">Kliknite da instalirate</string>
-    <string name="home_superuser_count">Superkorisnici: %d</string>
-    <string name="home_module_count">Module: %d</string>
     <string name="home_unsupported">Nepodržano</string>
     <string name="home_unsupported_reason">KernelSU samo podržava GKI kernele sad</string>
     <string name="home_manager_version">Verzija Upravitelja</string>
@@ -37,12 +35,10 @@
     <string name="settings">Podešavanja</string>
     <string name="module_version">Verzija</string>
     <string name="module_author">Autor</string>
-    <string name="refresh">Osvježi</string>
     <string name="show_system_apps">Prikažite sistemske aplikacije</string>
-    <string name="hide_system_apps">Sakrijte sistemske aplikacije</string>
     <string name="safe_mode">Sigurnosni mod</string>
     <string name="reboot_to_apply">Ponovo pokrenite da bi proradilo</string>
-    <string name="module_magisk_conflict">Module su isključene jer je u sukobu sa Magisk-om!</string>
+    <string name="module_magisk_conflict">"Moduli su nedostupni  jer su u sukobu sa Magisk-om!"</string>
     <string name="home_learn_kernelsu_url">https://kernelsu.org/guide/what-is-kernelsu.html</string>
     <string name="home_click_to_learn_kernelsu">Naučite kako da instalirate KernelSU i da koristite module</string>
     <string name="home_support_title">Podržite Nas</string>
@@ -54,7 +50,7 @@
     <string name="failed_to_update_sepolicy">Neuspješno ažuriranje SELinux pravila za: %s</string>
     <string name="home_working">Radi</string>
     <string name="home_working_version">Verzija: %d</string>
-    <string name="home_kernel">Kernel</string>
+    <string name="home_kernel">Kernel verzija</string>
     <string name="selinux_status_permissive">Permisivno</string>
     <string name="uninstall">Deinstalirajte</string>
     <string name="selinux_status_unknown">Nepoznato</string>
@@ -73,10 +69,17 @@
     <string name="selinux_status_disabled">Isključeno</string>
     <string name="about">O</string>
     <string name="module_uninstall_confirm">Jeste li sigurni da želite deinstalirati modulu %s\?</string>
-    <string name="module_overlay_fs_not_available">overlayfs nije dostupan, modula ne može raditi!</string>
     <string name="home_support_content">KernelSU je, i uvijek če biti, besplatan, i otvorenog izvora. Možete nam međutim pokazati da vas je briga s time da napravite donaciju.</string>
     <string name="profile_default">Zadano</string>
     <string name="profile_template">Šablon</string>
     <string name="profile_custom">Prilagođeno</string>
     <string name="profile_name">Naziv profila</string>
+    <string name="save_log">Sačuvaj Dnevnike</string>
+    <string name="module_install_prompt_with_name">Modul će biti instaliran</string>
+    <string name="module_sort_action_first">Sortiraj</string>
+    <string name="confirm">Potvrdi</string>
+    <string name="settings_sucompat">Preusmjeri su binarnu datoteku</string>
+    <string name="settings_sucompat_summary">Preusmjeri /system/bin/su na ksud za aplikacije kojima je dodijeljeno dopuštenje Superuser u Profilu aplikacije; učinkovito samo za nove procese.</string>
+    <string name="settings_kernel_umount">Kernel umount</string>
+    <string name="settings_kernel_umount_summary">Ponašanje umount na razini kernela kontrolira KernelSU</string>
 </resources>

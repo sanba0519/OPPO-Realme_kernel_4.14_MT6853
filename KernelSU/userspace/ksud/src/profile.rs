@@ -1,7 +1,8 @@
-use crate::utils::ensure_dir_exists;
-use crate::{defs, sepolicy};
-use anyhow::{Context, Result};
 use std::path::Path;
+
+use anyhow::{Context, Result};
+
+use crate::{defs, sepolicy, utils::ensure_dir_exists};
 
 pub fn set_sepolicy(pkg: String, policy: String) -> Result<()> {
     ensure_dir_exists(defs::PROFILE_SELINUX_DIR)?;
@@ -18,28 +19,38 @@ pub fn get_sepolicy(pkg: String) -> Result<()> {
     Ok(())
 }
 
-pub fn set_template(name: String, template: String) -> Result<()> {
+// ksud doesn't guarteen the correctness of template, it just save
+pub fn set_template(id: String, template: String) -> Result<()> {
     ensure_dir_exists(defs::PROFILE_TEMPLATE_DIR)?;
-    let template_file = Path::new(defs::PROFILE_TEMPLATE_DIR).join(name);
+    let template_file = Path::new(defs::PROFILE_TEMPLATE_DIR).join(id);
     std::fs::write(template_file, template)?;
     Ok(())
 }
 
-pub fn get_template(name: String) -> Result<()> {
-    let template_file = Path::new(defs::PROFILE_TEMPLATE_DIR).join(name);
+pub fn get_template(id: String) -> Result<()> {
+    let template_file = Path::new(defs::PROFILE_TEMPLATE_DIR).join(id);
     let template = std::fs::read_to_string(template_file)?;
     println!("{template}");
     Ok(())
 }
 
+pub fn delete_template(id: String) -> Result<()> {
+    let template_file = Path::new(defs::PROFILE_TEMPLATE_DIR).join(id);
+    std::fs::remove_file(template_file)?;
+    Ok(())
+}
+
 pub fn list_templates() -> Result<()> {
-    let templates = std::fs::read_dir(defs::PROFILE_TEMPLATE_DIR)?;
+    let templates = std::fs::read_dir(defs::PROFILE_TEMPLATE_DIR);
+    let Ok(templates) = templates else {
+        return Ok(());
+    };
     for template in templates {
         let template = template?;
         let template = template.file_name();
         if let Some(template) = template.to_str() {
             println!("{template}");
-        };
+        }
     }
     Ok(())
 }
@@ -60,9 +71,9 @@ pub fn apply_sepolies() -> Result<()> {
         };
         let sepolicy = sepolicy.path();
         if sepolicy::apply_file(&sepolicy).is_ok() {
-            log::info!("profile sepolicy applied: {:?}", sepolicy);
+            log::info!("profile sepolicy applied: {}", sepolicy.display());
         } else {
-            log::info!("profile sepolicy apply failed: {:?}", sepolicy);
+            log::info!("profile sepolicy apply failed: {}", sepolicy.display());
         }
     }
     Ok(())

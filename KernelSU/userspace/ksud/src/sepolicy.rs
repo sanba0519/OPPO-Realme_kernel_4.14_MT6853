@@ -1,29 +1,26 @@
-use anyhow::{bail, Result};
+use std::{ffi, path::Path, vec};
+
+use anyhow::{Result, bail};
 use derive_new::new;
 use nom::{
+    AsChar, IResult, Parser,
     branch::alt,
-    bytes::complete::{tag, take_while, take_while1, take_while_m_n},
-    character::{
-        complete::{space0, space1},
-        is_alphanumeric,
-    },
+    bytes::complete::{tag, take_while, take_while_m_n, take_while1},
+    character::complete::{space0, space1},
     combinator::map,
-    sequence::Tuple,
-    IResult, Parser,
 };
-use std::{path::Path, vec};
 
 type SeObject<'a> = Vec<&'a str>;
 
 fn is_sepolicy_char(c: char) -> bool {
-    is_alphanumeric(c as u8) || c == '_' || c == '-'
+    c.is_alphanum() || c == '_' || c == '-'
 }
 
 fn parse_single_word(input: &str) -> IResult<&str, &str> {
     take_while1(is_sepolicy_char).parse(input)
 }
 
-fn parse_bracket_objs(input: &str) -> IResult<&str, SeObject> {
+fn parse_bracket_objs(input: &str) -> IResult<&str, SeObject<'_>> {
     let (input, (_, words, _)) = (
         tag("{"),
         take_while_m_n(1, 100, |c: char| is_sepolicy_char(c) || c.is_whitespace()),
@@ -33,12 +30,12 @@ fn parse_bracket_objs(input: &str) -> IResult<&str, SeObject> {
     Ok((input, words.split_whitespace().collect()))
 }
 
-fn parse_single_obj(input: &str) -> IResult<&str, SeObject> {
+fn parse_single_obj(input: &str) -> IResult<&str, SeObject<'_>> {
     let (input, word) = take_while1(is_sepolicy_char).parse(input)?;
     Ok((input, vec![word]))
 }
 
-fn parse_star(input: &str) -> IResult<&str, SeObject> {
+fn parse_star(input: &str) -> IResult<&str, SeObject<'_>> {
     let (input, _) = tag("*").parse(input)?;
     Ok((input, vec!["*"]))
 }
@@ -46,12 +43,12 @@ fn parse_star(input: &str) -> IResult<&str, SeObject> {
 // 1. a single sepolicy word
 // 2. { obj1 obj2 obj3 ...}
 // 3. *
-fn parse_seobj(input: &str) -> IResult<&str, SeObject> {
+fn parse_seobj(input: &str) -> IResult<&str, SeObject<'_>> {
     let (input, strs) = alt((parse_single_obj, parse_bracket_objs, parse_star)).parse(input)?;
     Ok((input, strs))
 }
 
-fn parse_seobj_no_star(input: &str) -> IResult<&str, SeObject> {
+fn parse_seobj_no_star(input: &str) -> IResult<&str, SeObject<'_>> {
     let (input, strs) = alt((parse_single_obj, parse_bracket_objs)).parse(input)?;
     Ok((input, strs))
 }
@@ -167,13 +164,14 @@ enum PolicyStatement<'a> {
 }
 
 impl<'a> SeObjectParser<'a> for NormalPerm<'a> {
-    fn parse(input: &'a str) -> IResult<&str, Self> {
+    fn parse(input: &'a str) -> IResult<&'a str, Self> {
         let (input, op) = alt((
             tag("allow"),
             tag("deny"),
             tag("auditallow"),
             tag("dontaudit"),
-        ))(input)?;
+        ))
+        .parse(input)?;
 
         let (input, _) = space0(input)?;
         let (input, source) = parse_seobj(input)?;
@@ -193,7 +191,8 @@ impl<'a> SeObjectParser<'a> for XPerm<'a> {
             tag("allowxperm"),
             tag("auditallowxperm"),
             tag("dontauditxperm"),
-        ))(input)?;
+        ))
+        .parse(input)?;
 
         let (input, _) = space0(input)?;
         let (input, source) = parse_seobj(input)?;
@@ -215,7 +214,7 @@ impl<'a> SeObjectParser<'a> for XPerm<'a> {
 
 impl<'a> SeObjectParser<'a> for TypeState<'a> {
     fn parse(input: &'a str) -> IResult<&'a str, Self> {
-        let (input, op) = alt((tag("permissive"), tag("enforce")))(input)?;
+        let (input, op) = alt((tag("permissive"), tag("enforce"))).parse(input)?;
 
         let (input, _) = space1(input)?;
         let (input, stype) = parse_seobj_no_star(input)?;
@@ -243,7 +242,7 @@ impl<'a> SeObjectParser<'a> for Type<'a> {
 
 impl<'a> SeObjectParser<'a> for TypeAttr<'a> {
     fn parse(input: &'a str) -> IResult<&'a str, Self> {
-        let (input, _) = alt((tag("typeattribute"), tag("attradd")))(input)?;
+        let (input, _) = alt((tag("typeattribute"), tag("attradd"))).parse(input)?;
         let (input, _) = space1(input)?;
         let (input, stype) = parse_seobj_no_star(input)?;
         let (input, _) = space1(input)?;
@@ -265,7 +264,7 @@ impl<'a> SeObjectParser<'a> for Attr<'a> {
 
 impl<'a> SeObjectParser<'a> for TypeTransition<'a> {
     fn parse(input: &'a str) -> IResult<&'a str, Self> {
-        let (input, _) = alt((tag("type_transition"), tag("name_transition")))(input)?;
+        let (input, _) = alt((tag("type_transition"), tag("name_transition"))).parse(input)?;
         let (input, _) = space1(input)?;
         let (input, source) = parse_single_word(input)?;
         let (input, _) = space1(input)?;
@@ -294,7 +293,7 @@ impl<'a> SeObjectParser<'a> for TypeTransition<'a> {
 
 impl<'a> SeObjectParser<'a> for TypeChange<'a> {
     fn parse(input: &'a str) -> IResult<&'a str, Self> {
-        let (input, op) = alt((tag("type_change"), tag("type_member")))(input)?;
+        let (input, op) = alt((tag("type_change"), tag("type_member"))).parse(input)?;
         let (input, _) = space1(input)?;
         let (input, source) = parse_single_word(input)?;
         let (input, _) = space1(input)?;
@@ -337,7 +336,8 @@ impl<'a> PolicyStatement<'a> {
             map(TypeTransition::parse, PolicyStatement::TypeTransition),
             map(TypeChange::parse, PolicyStatement::TypeChange),
             map(GenFsCon::parse, PolicyStatement::GenFsCon),
-        ))(input)?;
+        ))
+        .parse(input)?;
         let (input, _) = space0(input)?;
         let (input, _) = take_while(|c| c == ';')(input)?;
         let (input, _) = space0(input)?;
@@ -352,13 +352,14 @@ where
     let mut statements = vec![];
 
     for line in input.split(['\n', ';']) {
-        if line.trim().is_empty() {
+        let trimmed_line = line.trim();
+        if trimmed_line.is_empty() || trimmed_line.starts_with('#') {
             continue;
         }
-        if let Ok((_, statement)) = PolicyStatement::parse(line.trim()) {
+        if let Ok((_, statement)) = PolicyStatement::parse(trimmed_line) {
             statements.push(statement);
         } else if strict {
-            bail!("Failed to parse policy statement: {}", line)
+            bail!("Failed to parse policy statement: {line}")
         }
     }
     Ok(statements)
@@ -389,11 +390,11 @@ impl TryFrom<&str> for PolicyObject {
     fn try_from(s: &str) -> Result<Self> {
         anyhow::ensure!(s.len() <= SEPOLICY_MAX_LEN, "policy object too long");
         if s == "*" {
-            return Ok(PolicyObject::All);
+            return Ok(Self::All);
         }
         let mut buf = [0u8; SEPOLICY_MAX_LEN];
         buf[..s.len()].copy_from_slice(s.as_bytes());
-        Ok(PolicyObject::One(buf))
+        Ok(Self::One(buf))
     }
 }
 
@@ -659,25 +660,25 @@ impl<'a> TryFrom<&'a PolicyStatement<'a>> for Vec<AtomicStatement> {
 struct FfiPolicy {
     cmd: u32,
     subcmd: u32,
-    sepol1: *const libc::c_char,
-    sepol2: *const libc::c_char,
-    sepol3: *const libc::c_char,
-    sepol4: *const libc::c_char,
-    sepol5: *const libc::c_char,
-    sepol6: *const libc::c_char,
-    sepol7: *const libc::c_char,
+    sepol1: *const ffi::c_char,
+    sepol2: *const ffi::c_char,
+    sepol3: *const ffi::c_char,
+    sepol4: *const ffi::c_char,
+    sepol5: *const ffi::c_char,
+    sepol6: *const ffi::c_char,
+    sepol7: *const ffi::c_char,
 }
 
-fn to_c_ptr(pol: &PolicyObject) -> *const libc::c_char {
+const fn to_c_ptr(pol: &PolicyObject) -> *const ffi::c_char {
     match pol {
         PolicyObject::None | PolicyObject::All => std::ptr::null(),
-        PolicyObject::One(s) => s.as_ptr().cast::<libc::c_char>(),
+        PolicyObject::One(s) => s.as_ptr().cast::<ffi::c_char>(),
     }
 }
 
 impl From<AtomicStatement> for FfiPolicy {
-    fn from(policy: AtomicStatement) -> FfiPolicy {
-        FfiPolicy {
+    fn from(policy: AtomicStatement) -> Self {
+        Self {
             cmd: policy.cmd,
             subcmd: policy.subcmd,
             sepol1: to_c_ptr(&policy.sepol1),
@@ -691,38 +692,24 @@ impl From<AtomicStatement> for FfiPolicy {
     }
 }
 
-#[cfg(any(target_os = "linux", target_os = "android"))]
 fn apply_one_rule<'a>(statement: &'a PolicyStatement<'a>, strict: bool) -> Result<()> {
     let policies: Vec<AtomicStatement> = statement.try_into()?;
 
     for policy in policies {
-        let mut result: u32 = 0;
-        let cpolicy = FfiPolicy::from(policy);
-        unsafe {
-            #[allow(clippy::cast_possible_wrap)]
-            libc::prctl(
-                crate::ksu::KERNEL_SU_OPTION as i32, // supposed to overflow
-                crate::ksu::CMD_SET_SEPOLICY,
-                0,
-                std::ptr::addr_of!(cpolicy).cast::<libc::c_void>(),
-                std::ptr::addr_of_mut!(result).cast::<libc::c_void>(),
-            );
-        }
-
-        if result != crate::ksu::KERNEL_SU_OPTION {
-            log::warn!("apply rule: {:?} failed.", statement);
+        let ffi_policy = FfiPolicy::from(policy);
+        let cmd = crate::ksucalls::SetSepolicyCmd {
+            cmd: 0,
+            arg: &raw const ffi_policy as u64,
+        };
+        if let Err(e) = crate::ksucalls::set_sepolicy(&cmd) {
+            log::warn!("apply rule {statement:?} failed: {e}");
             if strict {
-                return Err(anyhow::anyhow!("apply rule {:?} failed.", statement));
+                return Err(anyhow::anyhow!("apply rule {statement:?} failed: {e}"));
             }
         }
     }
 
     Ok(())
-}
-
-#[cfg(not(any(target_os = "linux", target_os = "android")))]
-fn apply_one_rule<'a>(_statement: &'a PolicyStatement<'a>, _strict: bool) -> Result<()> {
-    unimplemented!()
 }
 
 pub fn live_patch(policy: &str) -> Result<()> {
