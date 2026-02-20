@@ -8,6 +8,7 @@
 #include "ss/services.h"
 #include "linux/lsm_audit.h" // IWYU pragma: keep
 #include "xfrm.h"
+#include "compat.h"
 
 #define SELINUX_POLICY_INSTEAD_SELINUX_SS
 
@@ -36,84 +37,80 @@ static struct policydb *get_policydb(void)
 
 static DEFINE_MUTEX(ksu_rules);
 
-    static int apply_kernelsu_rules(void)
+void apply_kernelsu_rules(void)
 {
-    pr_info("SukiSU: apply_kernelsu_rules skipped on 4.14 (policydb not exported)\n");
-    return 0;   // 直接返回，不注入规则
-    
-    //struct policydb *db;
-
-    //if (!getenforce()) {
-      //  pr_info("SELinux permissive or disabled, apply rules!\n");
-    //}
+    struct policydb *db;
 
     mutex_lock(&ksu_rules);
 
     db = get_policydb();
-
-    ksu_permissive(db, KERNEL_SU_DOMAIN);
-    ksu_typeattribute(db, KERNEL_SU_DOMAIN, "mlstrustedsubject");
-    ksu_typeattribute(db, KERNEL_SU_DOMAIN, "netdomain");
-    ksu_typeattribute(db, KERNEL_SU_DOMAIN, "bluetoothdomain");
-
-    // Create unconstrained file type
-    ksu_type(db, KERNEL_SU_FILE, "file_type");
-    ksu_typeattribute(db, KERNEL_SU_FILE, "mlstrustedobject");
-    ksu_allow(db, ALL, KERNEL_SU_FILE, ALL, ALL);
-
-    // allow all!
-    ksu_allow(db, KERNEL_SU_DOMAIN, ALL, ALL, ALL);
-
-    // allow us do any ioctl
-    if (db->policyvers >= POLICYDB_VERSION_XPERMS_IOCTL) {
-        ksu_allowxperm(db, KERNEL_SU_DOMAIN, ALL, "blk_file", ALL);
-        ksu_allowxperm(db, KERNEL_SU_DOMAIN, ALL, "fifo_file", ALL);
-        ksu_allowxperm(db, KERNEL_SU_DOMAIN, ALL, "chr_file", ALL);
-        ksu_allowxperm(db, KERNEL_SU_DOMAIN, ALL, "file", ALL);
+    if (!db) {
+        pr_warn("SukiSU: failed to get policydb, skip all rules injection\n");
+        mutex_unlock(&ksu_rules);
+        return;
     }
 
-    // our ksud triggered by init
+    pr_info("SukiSU: applying SELinux rules on 4.14 (core only)\n");
+
+    // 核心规则：让 KSU domain permissive + 全允许（su 基本可用）
+    ksu_permissive(db, KERNEL_SU_DOMAIN);
+    ksu_allow(db, KERNEL_SU_DOMAIN, ALL, ALL, ALL);
+
+    // init 交互（必须保留）
     ksu_allow(db, "init", KERNEL_SU_DOMAIN, ALL, ALL);
 
-    // copied from Magisk rules
-    // suRights
+    // servicemanager 交互（su 授权常见通道）
     ksu_allow(db, "servicemanager", KERNEL_SU_DOMAIN, "dir", "search");
     ksu_allow(db, "servicemanager", KERNEL_SU_DOMAIN, "dir", "read");
     ksu_allow(db, "servicemanager", KERNEL_SU_DOMAIN, "file", "open");
     ksu_allow(db, "servicemanager", KERNEL_SU_DOMAIN, "file", "read");
-    ksu_allow(db, "servicemanager", KERNEL_SU_DOMAIN, "process", "getattr");
-    ksu_allow(db, ALL, KERNEL_SU_DOMAIN, "process", "sigchld");
 
-    // allowLog
+    // logd 交互（日志权限）
     ksu_allow(db, "logd", KERNEL_SU_DOMAIN, "dir", "search");
     ksu_allow(db, "logd", KERNEL_SU_DOMAIN, "file", "read");
     ksu_allow(db, "logd", KERNEL_SU_DOMAIN, "file", "open");
     ksu_allow(db, "logd", KERNEL_SU_DOMAIN, "file", "getattr");
 
-    // dumpsys
+    // dumpsys / bootctl / binder 等常见权限（保留这些能让大部分 root App 正常）
     ksu_allow(db, ALL, KERNEL_SU_DOMAIN, "fd", "use");
     ksu_allow(db, ALL, KERNEL_SU_DOMAIN, "fifo_file", "write");
     ksu_allow(db, ALL, KERNEL_SU_DOMAIN, "fifo_file", "read");
     ksu_allow(db, ALL, KERNEL_SU_DOMAIN, "fifo_file", "open");
     ksu_allow(db, ALL, KERNEL_SU_DOMAIN, "fifo_file", "getattr");
 
-    // bootctl
     ksu_allow(db, "hwservicemanager", KERNEL_SU_DOMAIN, "dir", "search");
     ksu_allow(db, "hwservicemanager", KERNEL_SU_DOMAIN, "file", "read");
     ksu_allow(db, "hwservicemanager", KERNEL_SU_DOMAIN, "file", "open");
-    ksu_allow(db, "hwservicemanager", KERNEL_SU_DOMAIN, "process", "getattr");
 
-    // Allow all binder transactions
     ksu_allow(db, ALL, KERNEL_SU_DOMAIN, "binder", ALL);
 
-    // Allow system server kill su process
     ksu_allow(db, "system_server", KERNEL_SU_DOMAIN, "process", "getpgid");
     ksu_allow(db, "system_server", KERNEL_SU_DOMAIN, "process", "sigkill");
 
-    // https://android-review.googlesource.com/c/platform/system/logging/+/3725346
+    // dontaudit（避免日志噪音）
     ksu_dontaudit(db, "untrusted_app", KERNEL_SU_DOMAIN, "dir", "getattr");
 
+    // 复杂规则先注释掉（4.14 容易报错，等通过后再放开测试）
+    /*
+    ksu_typeattribute(db, KERNEL_SU_DOMAIN, "mlstrustedsubject");
+    ksu_typeattribute(db, KERNEL_SU_DOMAIN, "netdomain");
+    ksu_typeattribute(db, KERNEL_SU_DOMAIN, "bluetoothdomain");
+
+    ksu_type(db, KERNEL_SU_FILE, "file_type");
+    ksu_typeattribute(db, KERNEL_SU_FILE, "mlstrustedobject");
+    ksu_allow(db, ALL, KERNEL_SU_FILE, ALL, ALL);
+
+    if (db->policyvers >= POLICYDB_VERSION_XPERMS_IOCTL) {
+        ksu_allowxperm(db, KERNEL_SU_DOMAIN, ALL, "blk_file", ALL);
+        ksu_allowxperm(db, KERNEL_SU_DOMAIN, ALL, "fifo_file", ALL);
+        ksu_allowxperm(db, KERNEL_SU_DOMAIN, ALL, "chr_file", ALL);
+        ksu_allowxperm(db, KERNEL_SU_DOMAIN, ALL, "file", ALL);
+    }
+    */
+
     mutex_unlock(&ksu_rules);
+
+    pr_info("SukiSU: core rules applied successfully\n");
 }
 
 #define MAX_SEPOL_LEN 128
@@ -452,12 +449,10 @@ int handle_sepolicy(unsigned long arg3, void __user *arg4)
 exit:
     mutex_unlock(&ksu_rules);
 
-    // only allow and xallow needs to reset avc cache, but we cannot do that because
-    // we are in atomic context. so we just reset it every time (skip on old kernel)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5,0,0)
     reset_avc_cache();
 #else
-    pr_info("SukiSU: reset_avc_cache skipped in atomic context on 4.14\n");
+    pr_info("SukiSU: reset_avc_cache skipped on 4.14\n");
 #endif
 
     return ret;
