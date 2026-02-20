@@ -92,7 +92,7 @@ static ssize_t ksu_wrapper_write_iter(struct kiocb *iocb, struct iov_iter *iovi)
 }
 
 // 4.14 内核无 iopoll 支持，直接返回不支持
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
+/*#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
 static int ksu_wrapper_iopoll(struct kiocb *kiocb, struct io_comp_batch *icb,
                               unsigned int v)
 {
@@ -105,7 +105,7 @@ static int ksu_wrapper_iopoll(struct kiocb *kiocb, bool spin)
     // 4.14 及以下签名，也返回不支持
     return -EOPNOTSUPP;
 }
-#endif
+#endif*/ //4.14内核不支持
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0)
 static int ksu_wrapper_iterate(struct file *fp, struct dir_context *dc)
@@ -123,12 +123,12 @@ static int ksu_wrapper_iterate_shared(struct file *fp, struct dir_context *dc)
     return orig->f_op->iterate_shared(orig, dc);
 }
 
-static __poll_t ksu_wrapper_poll(struct file *fp, struct poll_table_struct *pts)
+/*static __poll_t ksu_wrapper_poll(struct file *fp, struct poll_table_struct *pts)
 {
     struct ksu_file_wrapper *data = fp->private_data;
     struct file *orig = data->orig;
     return orig->f_op->poll(orig, pts);
-}
+}*/  //4.14内核用不上
 
 static long ksu_wrapper_unlocked_ioctl(struct file *fp, unsigned int cmd,
                                        unsigned long arg)
@@ -384,7 +384,7 @@ static struct ksu_file_wrapper *ksu_create_file_wrapper(struct file *fp)
     p->ops.write = fp->f_op->write ? ksu_wrapper_write : NULL;
     p->ops.read_iter = fp->f_op->read_iter ? ksu_wrapper_read_iter : NULL;
     p->ops.write_iter = fp->f_op->write_iter ? ksu_wrapper_write_iter : NULL;
-    p->ops.iopoll : NULL; //4.14内核不支持iopoll
+    p->ops.iopoll = NULL;//4.14内核不支持iopoll
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0)
     p->ops.iterate = fp->f_op->iterate ? ksu_wrapper_iterate : NULL;
 #endif
@@ -399,7 +399,7 @@ static struct ksu_file_wrapper *ksu_create_file_wrapper(struct file *fp)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
     p->ops.fop_flags = fp->f_op->fop_flags;
 #else
-    p->ops.mmap_supported_flags = fp->f_op->mmap_supported_flags;
+    p->ops.mmap_supported_flags = 0;
 #endif
     p->ops.flush = fp->f_op->flush ? ksu_wrapper_flush : NULL;
     p->ops.release = ksu_wrapper_release;
@@ -421,7 +421,7 @@ static struct ksu_file_wrapper *ksu_create_file_wrapper(struct file *fp)
     p->ops.show_fdinfo = fp->f_op->show_fdinfo ? ksu_wrapper_show_fdinfo : NULL;
     p->ops.copy_file_range =
         fp->f_op->copy_file_range ? ksu_wrapper_copy_file_range : NULL;
-    p->ops.remap_file_range =NULL
+    p->ops.remap_file_range =NULL;
         fp->f_op->remap_file_range ? ksu_wrapper_remap_file_range : NULL;
     p->ops.fadvise = NULL;
 
