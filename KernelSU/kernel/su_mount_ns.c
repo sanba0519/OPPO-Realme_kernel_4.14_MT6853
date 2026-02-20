@@ -21,6 +21,8 @@
 #include "su_mount_ns.h"
 #include "compat.h"
 
+#define CLONE_NEWNS 0x20000
+
 extern int path_mount(const char *dev_name, struct path *path,
                       const char *type_page, unsigned long flags,
                       void *data_page);
@@ -31,36 +33,24 @@ extern long __arm64_sys_setns(const struct pt_regs *regs);
 extern long __x64_sys_setns(const struct pt_regs *regs);
 #endif
 
-static long ksu_sys_setns(int fd, int flags)
+// 简化 ksu_sys_setns，只为兼容保留（实际可删除或注释）
+static long ksu_sys_setns(int fd, int nstype)
 {
-    long ret;
-
-#if defined(__aarch64__)
-    // 4.14 arm64 内核直接调用 sys_setns 系统调用
-    ret = sys_setns(fd, flags);
+    long ret = sys_setns(fd, nstype);
     if (ret) {
-        pr_warn("SukiSU: sys_setns(%d, %d) failed: %ld\n", fd, flags, ret);
+        pr_warn("SukiSU: sys_setns(%d, %d) failed: %ld\n", fd, nstype, ret);
     }
-#elif defined(__x86_64__)
-    // x86_64 如果需要，用 pt_regs 调用（但你的机型是 arm64，可注释或删除）
-    struct pt_regs regs;
-    memset(&regs, 0, sizeof(regs));
-    regs.di = fd;
-    regs.si = flags;
-    ret = __x64_sys_setns(&regs);
-#else
-    #error "Unsupported architecture for ksu_sys_setns"
-#endif
-
     return ret;
 }
 
 // global mode , need CAP_SYS_ADMIN and CAP_SYS_CHROOT to perform setns
 static void ksu_mnt_ns_global(void)
 {
-    // save current working directory as absolute path before setns
+    char *pwd_buf = NULL;
     char *pwd_path = NULL;
-    char *pwd_buf = kmalloc(PATH_MAX, GFP_KERNEL);
+
+    // save current working directory as absolute path before setns
+    pwd_buf = kmalloc(PATH_MAX, GFP_KERNEL);
     if (!pwd_buf) {
         pr_warn("no mem for pwd buffer, skip restore pwd!!\n");
         goto try_setns;
@@ -73,8 +63,7 @@ static void ksu_mnt_ns_global(void)
 
     if (IS_ERR(pwd_path)) {
         if (PTR_ERR(pwd_path) == -ENAMETOOLONG) {
-            pr_warn("absolute pwd longer than: %d, skip restore pwd!!\n",
-                    PATH_MAX);
+            pr_warn("absolute pwd longer than: %d, skip restore pwd!!\n", PATH_MAX);
         } else {
             pr_warn("get absolute pwd failed: %ld\n", PTR_ERR(pwd_path));
         }
@@ -82,10 +71,7 @@ static void ksu_mnt_ns_global(void)
     }
 
 try_setns:
-
     rcu_read_lock();
-    // &init_task is not init, but swapper/idle, which forks the init process
-    // so we need find init process
     struct pid *pid_struct = find_pid_ns(1, &init_pid_ns);
     if (unlikely(!pid_struct)) {
         rcu_read_unlock();
@@ -99,6 +85,7 @@ try_setns:
         pr_warn("failed to get task_struct for PID 1\n");
         goto out;
     }
+
     struct path ns_path;
     long ret = ns_get_path(&ns_path, pid1_task, &mntns_operations);
     put_task_struct(pid1_task);
@@ -106,12 +93,11 @@ try_setns:
         pr_warn("failed get path for init mount namespace: %ld\n", ret);
         goto out;
     }
-    struct file *ns_file = dentry_open(&ns_path, O_RDONLY, ksu_cred);
 
+    struct file *ns_file = dentry_open(&ns_path, O_RDONLY, ksu_cred);
     path_put(&ns_path);
     if (IS_ERR(ns_file)) {
-        pr_warn("failed open file for init mount namespace: %ld\n",
-                PTR_ERR(ns_file));
+        pr_warn("failed open file for init mount namespace: %ld\n", PTR_ERR(ns_file));
         goto out;
     }
 
@@ -123,25 +109,15 @@ try_setns:
     }
 
     fd_install(fd, ns_file);
-    ret = ksu_sys_setns(fd, CLONE_NEWNS);
 
+    // 执行 setns 到 init 的 mount ns
+    ret = sys_setns(fd, CLONE_NEWNS);  // 固定 CLONE_NEWNS（mount namespace）
+    if (ret) {
+        pr_warn("SukiSU: sys_setns failed: %ld\n", ret);
+        goto out_fd;
+    }
 
-// 假设前面的 ns_get_path 已经用了 ret，这里继续用同一个 ret
-ret = ns_get_path(&ns_path, pid1_task, &mntns_operations);
-if (ret) {
-    pr_warn("ns_get_path failed: %ld\n", ret);
-    goto out;
-}
-
-
-// setns 调用（复用原来的 ret）
-ret = sys_setns(fd, flags);  // 注意：这里用 flags（或 nstype，根据你的函数参数）
-if (ret) {
-    pr_warn("SukiSU: sys_setns failed: %ld\n", ret);
-    goto out;
-}
-
-// close(fd) 调用（继续复用 ret）
+    // close(fd)
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5,11,0)
     ret = sys_close(fd);
     if (ret) {
@@ -151,17 +127,23 @@ if (ret) {
     ksys_close(fd);
 #endif
 
-// try to restore working directory...
-if (pwd_path) {
-    struct path new_pwd;
-    int err = kern_path(pwd_path, 0, &new_pwd);
-    if (!err) {
-        set_fs_pwd(current->fs, &new_pwd);
-        path_put(&new_pwd);
-    } else {
-        pr_warn("restore pwd failed: %d, path: %s\n", err, pwd_path);
+    // restore working directory
+    if (pwd_path) {
+        struct path new_pwd;
+        int err = kern_path(pwd_path, 0, &new_pwd);
+        if (!err) {
+            set_fs_pwd(current->fs, &new_pwd);
+            path_put(&new_pwd);
+        } else {
+            pr_warn("restore pwd failed: %d, path: %s\n", err, pwd_path);
+        }
     }
-}
+
+out_fd:
+    // 如果 setns 失败，close fd
+    if (ret) {
+        sys_close(fd);  // 再 close 一次，确保释放
+    }
 
 out:
     kfree(pwd_buf);
