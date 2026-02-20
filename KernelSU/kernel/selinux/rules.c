@@ -8,6 +8,7 @@
 #include "ss/services.h"
 #include "linux/lsm_audit.h" // IWYU pragma: keep
 #include "xfrm.h"
+#include "compat.h"
 
 #define SELINUX_POLICY_INSTEAD_SELINUX_SS
 
@@ -36,7 +37,7 @@ static struct policydb *get_policydb(void)
 
 static DEFINE_MUTEX(ksu_rules);
 
-    static int apply_kernelsu_rules(void)
+    void apply_kernelsu_rules(void)
 {
     pr_info("SukiSU: apply_kernelsu_rules skipped on 4.14 (policydb not exported)\n");
     return 0;   // 直接返回，不注入规则
@@ -452,12 +453,10 @@ int handle_sepolicy(unsigned long arg3, void __user *arg4)
 exit:
     mutex_unlock(&ksu_rules);
 
-    // only allow and xallow needs to reset avc cache, but we cannot do that because
-    // we are in atomic context. so we just reset it every time (skip on old kernel)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5,0,0)
     reset_avc_cache();
 #else
-    pr_info("SukiSU: reset_avc_cache skipped in atomic context on 4.14\n");
+    pr_info("SukiSU: reset_avc_cache skipped on 4.14\n");
 #endif
 
     return ret;
