@@ -40,7 +40,8 @@ static long ksu_sys_setns(int fd, int flags)
     PT_REGS_PARM2(&regs) = flags;
 
 #if defined(__aarch64__)
-    return __arm64_sys_setns(&regs);
+    extern long sys_setns(int fd, unsigned int nstype); //做处理
+    sys_setns(fd, nstype);                              //做处理
 #elif defined(__x86_64__)
     return __x64_sys_setns(&regs);
 #else
@@ -119,7 +120,8 @@ try_setns:
     ret = ksu_sys_setns(fd, CLONE_NEWNS);
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5, 11, 0)
-    close_fd(fd);
+    extern long sys_close(unsigned int fd);//做处理
+    sys_close(fd);//做处理
 #else
     ksys_close(fd);
 #endif

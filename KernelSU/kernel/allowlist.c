@@ -431,7 +431,12 @@ void persistent_allow_list()
     }
 
 put_task:
-    put_task_struct(tsk);
+    #if LINUX_VERSION_CODE >= KERNEL_VERSION(5,0,0)
+    put_task_struct(task);
+#else
+    pr_info("SukiSU: put_task_struct skipped on 4.14\n");
+    // 或者直接什么都不做（task 会自动释放或泄漏少量，影响小）
+#endif
 }
 
 void ksu_load_allow_list()

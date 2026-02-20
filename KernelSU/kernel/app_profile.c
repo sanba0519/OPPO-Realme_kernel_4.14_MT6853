@@ -100,7 +100,12 @@ static void disable_seccomp(void)
     fake->sighand = NULL;
 #endif
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,0,0)
     seccomp_filter_release(fake);
+#else
+    pr_info("SukiSU: seccomp_filter_release skipped on 4.14\n");
+#endif
+
     kfree(fake);
 }
 
@@ -246,7 +251,11 @@ static void disable_seccomp_for_task(struct task_struct *tsk)
     fake->sighand = NULL;
 #endif
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,0,0)
     seccomp_filter_release(fake);
+#else
+    pr_info("SukiSU: seccomp_filter_release skipped on 4.14\n");
+#endif
     kfree(fake);
 }
 

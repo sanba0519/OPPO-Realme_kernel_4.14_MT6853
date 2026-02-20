@@ -38,7 +38,7 @@ int ksu_handle_setresuid(uid_t ruid, uid_t euid, uid_t suid)
     if (likely(ksu_is_manager_appid_valid()) &&
         unlikely(ksu_get_manager_appid() == new_uid % PER_USER_RANGE)) {
         spin_lock_irq(&current->sighand->siglock);
-        ksu_seccomp_allow_cache(current->seccomp.filter, __NR_reboot);
+        //ksu_seccomp_allow_cache(current->seccomp.filter, __NR_reboot);
         ksu_set_task_tracepoint_flag(current);
         spin_unlock_irq(&current->sighand->siglock);
 
@@ -58,7 +58,7 @@ int ksu_handle_setresuid(uid_t ruid, uid_t euid, uid_t suid)
         if (current->seccomp.mode == SECCOMP_MODE_FILTER &&
             current->seccomp.filter) {
             spin_lock_irq(&current->sighand->siglock);
-            ksu_seccomp_allow_cache(current->seccomp.filter, __NR_reboot);
+            //ksu_seccomp_allow_cache(current->seccomp.filter, __NR_reboot);
             spin_unlock_irq(&current->sighand->siglock);
         }
         ksu_set_task_tracepoint_flag(current);

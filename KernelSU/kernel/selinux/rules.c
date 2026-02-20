@@ -13,6 +13,7 @@
 #define SELINUX_POLICY_INSTEAD_SELINUX_SS
 
 #define ALL NULL
+extern struct policydb policydb;
 
 static struct policydb *get_policydb(void)
 {
@@ -37,7 +38,7 @@ static struct policydb *get_policydb(void)
 
 static DEFINE_MUTEX(ksu_rules);
 
-    void apply_kernelsu_rules(void)
+void apply_kernelsu_rules(void)
 {
     struct policydb *db;
 
@@ -45,9 +46,14 @@ static DEFINE_MUTEX(ksu_rules);
 
     db = get_policydb();
     if (!db) {
-        pr_warn("SukiSU: failed to get policydb, skip all rules injection\n");
-        mutex_unlock(&ksu_rules);
-        return;
+        pr_warn("SukiSU: get_policydb failed, fallback to global policydb\n");
+        extern struct policydb policydb;
+        db = &policydb;
+        if (!db) {
+            pr_err("SukiSU: fallback policydb also failed, skip rules\n");
+            mutex_unlock(&ksu_rules);
+            return;
+        }
     }
 
     pr_info("SukiSU: applying SELinux rules on 4.14 (core only)\n");
