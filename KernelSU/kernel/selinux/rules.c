@@ -1,7 +1,7 @@
 #include <linux/uaccess.h>
 #include <linux/types.h>
 #include <linux/version.h>
-
+#include <linux/printk.h>
 #include "../klog.h" // IWYU pragma: keep
 #include "selinux.h"
 #include "sepolicy.h"
@@ -15,9 +15,22 @@
 
 static struct policydb *get_policydb(void)
 {
-    struct policydb *db;
+    struct policydb *db = NULL;  // 先初始化为 NULL
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,0,0)
     struct selinux_policy *policy = selinux_state.policy;
+    if (!policy) {
+        pr_err("SukiSU: selinux_state.policy is NULL\n");
+        return NULL;  // 返回 NULL 表示失败
+    }
     db = &policy->policydb;
+#else
+    // 老内核（4.14）：policydb 是全局变量（extern 声明）
+    extern struct policydb policydb;
+    db = &policydb;
+    pr_info("SukiSU: Using global policydb for old kernel < 5.0\n");
+#endif
+
     return db;
 }
 
