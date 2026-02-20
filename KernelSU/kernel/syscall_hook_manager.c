@@ -241,11 +241,11 @@ static inline bool check_syscall_fastpath(int nr)
     case __NR_execve:
     case __NR_setresuid:
     case __NR_clone:
-    //case __NR_clone3://4.14内核无
-        //return true;
-    //default:
-       // return false;
-   // }
+    //case __NR_clone3:  //4.14内核无
+        return true;
+    default:
+        return false;
+    }
 }
 
 // Unmark init's child that are not zygote, adbd or ksud
