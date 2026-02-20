@@ -684,8 +684,15 @@ if (!new_val_to_name_types) {
 // 返回成功，继续后续逻辑
 #endif
 
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,15,0)
+    db->sym_val_to_name[SYM_TYPES][value - 1] = key;  // 假设 key 是类型名字字符串
     db->sym_val_to_name[SYM_TYPES] = new_val_to_name_types;
-    db->sym_val_to_name[SYM_TYPES][value - 1] = key;
+#else
+    // 老内核（4.14）：sym_val_to_name 是 flex_array*，不做赋值
+    pr_info("SukiSU: Skipped sym_val_to_name assignment for new type %d (old kernel flex_array)\n", value - 1);
+    // 不需要额外处理 flex_array_put_ptr 等，跳过即可
+#endif
 
     int i;
     for (i = 0; i < db->p_roles.nprim; ++i) {
