@@ -1,3 +1,8 @@
+/*
+ * This file is part of KernelSU, licensed under the GNU General Public License v3.
+ * See the LICENSE file in the root directory for more information.
+ */
+
 #include <linux/gfp.h>
 #include <linux/fdtable.h>
 #include <linux/export.h>
@@ -88,47 +93,21 @@ static ssize_t ksu_wrapper_write_iter(struct kiocb *iocb, struct iov_iter *iovi)
     struct ksu_file_wrapper *data = iocb->ki_filp->private_data;
     struct file *orig = data->orig;
     iocb->ki_filp = orig;
-    return orig->f_op->write_iter(iocb, iovi);  // 保留原逻辑，4.14 支持
+    return orig->f_op->write_iter(iocb, iovi);
 }
 
 // 4.14 内核无 iopoll 支持，直接返回不支持
-/*#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
-static int ksu_wrapper_iopoll(struct kiocb *kiocb, struct io_comp_batch *icb,
-                              unsigned int v)
-{
-    // 6.1+ 签名，直接返回不支持
-    return -EOPNOTSUPP;
-}
-#else
 static int ksu_wrapper_iopoll(struct kiocb *kiocb, bool spin)
 {
-    // 4.14 及以下签名，也返回不支持
     return -EOPNOTSUPP;
 }
-#endif*/ //4.14内核不支持
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0)
-static int ksu_wrapper_iterate(struct file *fp, struct dir_context *dc)
-{
-    struct ksu_file_wrapper *data = fp->private_data;
-    struct file *orig = data->orig;
-    return orig->f_op->iterate(orig, dc);
-}
-#endif
-
-static int ksu_wrapper_iterate_shared(struct file *fp, struct dir_context *dc)
-{
-    struct ksu_file_wrapper *data = fp->private_data;
-    struct file *orig = data->orig;
-    return orig->f_op->iterate_shared(orig, dc);
-}
-
-/*static __poll_t ksu_wrapper_poll(struct file *fp, struct poll_table_struct *pts)
+static unsigned int ksu_wrapper_poll(struct file *fp, struct poll_table_struct *pts)
 {
     struct ksu_file_wrapper *data = fp->private_data;
     struct file *orig = data->orig;
     return orig->f_op->poll(orig, pts);
-}*/  //4.14内核用不上
+}
 
 static long ksu_wrapper_unlocked_ioctl(struct file *fp, unsigned int cmd,
                                        unsigned long arg)
@@ -182,19 +161,6 @@ static int ksu_wrapper_lock(struct file *fp, int arg1, struct file_lock *fl)
     return orig->f_op->lock(orig, arg1, fl);
 }
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0)
-static ssize_t ksu_wrapper_sendpage(struct file *fp, struct page *pg, int arg1,
-                                    size_t sz, loff_t *off, int arg2)
-{
-    struct ksu_file_wrapper *data = fp->private_data;
-    struct file *orig = data->orig;
-    if (orig->f_op->sendpage) {
-        return orig->f_op->sendpage(orig, pg, arg1, sz, off, arg2);
-    }
-    return -EINVAL;
-}
-#endif
-
 static unsigned long ksu_wrapper_get_unmapped_area(struct file *fp,
                                                    unsigned long arg1,
                                                    unsigned long arg2,
@@ -208,8 +174,6 @@ static unsigned long ksu_wrapper_get_unmapped_area(struct file *fp,
     }
     return -EINVAL;
 }
-
-// static int ksu_wrapper_check_flags(int arg) {}
 
 static int ksu_wrapper_flock(struct file *fp, int arg1, struct file_lock *fl)
 {
@@ -245,54 +209,8 @@ static ssize_t ksu_wrapper_splice_read(struct file *fp, loff_t *off,
     return -EINVAL;
 }
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
-void ksu_wrapper_splice_eof(struct file *fp)
-{
-    struct ksu_file_wrapper *data = fp->private_data;
-    struct file *orig = data->orig;
-    if (orig->f_op->splice_eof) {
-        return orig->f_op->splice_eof(orig);
-    }
-}
-#endif
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
-static int ksu_wrapper_setlease(struct file *fp, int arg1,
-                                struct file_lease **fl, void **p)
-{
-    struct ksu_file_wrapper *data = fp->private_data;
-    struct file *orig = data->orig;
-    if (orig->f_op->setlease) {
-        return orig->f_op->setlease(orig, arg1, fl, p);
-    }
-    return -EINVAL;
-}
-#elif LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
-static int ksu_wrapper_setlease(struct file *fp, int arg1,
-                                struct file_lock **fl, void **p)
-{
-    struct ksu_file_wrapper *data = fp->private_data;
-    struct file *orig = data->orig;
-    if (orig->f_op->setlease) {
-        return orig->f_op->setlease(orig, arg1, fl, p);
-    }
-    return -EINVAL;
-}
-#else
-static int ksu_wrapper_setlease(struct file *fp, long arg1,
-                                struct file_lock **fl, void **p)
-{
-    struct ksu_file_wrapper *data = fp->private_data;
-    struct file *orig = data->orig;
-    if (orig->f_op->setlease) {
-        return orig->f_op->setlease(orig, arg1, fl, p);
-    }
-    return -EINVAL;
-}
-#endif
-
-static long ksu_wrapper_fallocate(struct file *fp, int mode, loff_t offset,
-                                  loff_t len)
+static int ksu_wrapper_fallocate(struct file *fp, int mode, loff_t offset,
+                                 loff_t len)
 {
     struct ksu_file_wrapper *data = fp->private_data;
     struct file *orig = data->orig;
@@ -311,16 +229,13 @@ static void ksu_wrapper_show_fdinfo(struct seq_file *m, struct file *f)
     }
 }
 
-// https://cs.android.com/android/kernel/superproject/+/common-android-mainline:common/fs/read_write.c;l=1593-1606;drc=398da7defe218d3e51b0f3bdff75147e28125b60
 static ssize_t ksu_wrapper_copy_file_range(struct file *file_in, loff_t pos_in,
                                            struct file *file_out,
                                            loff_t pos_out, size_t len,
                                            unsigned int flags)
 {
-    struct ksu_file_wrapper *data = file_out->private_data;
-    struct file *orig = data->orig;
-    //return orig->f_op->copy_file_range(file_in, pos_in, orig, pos_out, len,
-     //                                  flags);
+    // 4.14 无 copy_file_range，直接返回不支持
+    return -EOPNOTSUPP;
 }
 
 static loff_t ksu_wrapper_remap_file_range(struct file *file_in, loff_t pos_in,
@@ -328,40 +243,21 @@ static loff_t ksu_wrapper_remap_file_range(struct file *file_in, loff_t pos_in,
                                            loff_t pos_out, loff_t len,
                                            unsigned int remap_flags)
 {
-    /*if (remap_flags & REMAP_FILE_DEDUP) {
-        struct ksu_file_wrapper *data = file_out->private_data;
-        struct file *orig = data->orig;
-        //return orig->f_op->remap_file_range(file_in, pos_in, orig, pos_out, len,
-                                          //  remap_flags);
-    } else {
-        struct ksu_file_wrapper *data = file_in->private_data;
-        struct file *orig = data->orig;
-        //return orig->f_op->remap_file_range(orig, pos_in, file_out, pos_out,
-                                          //  len, remap_flags);
-    }  */
+    // 4.14 无 remap_file_range，直接返回不支持
+    return -EOPNOTSUPP;
 }
 
 static int ksu_wrapper_fadvise(struct file *fp, loff_t off1, loff_t off2, int flags)
 {
-    struct ksu_file_wrapper *data = fp->private_data;
-    struct file *orig = data->orig;
-
-    // 4.14 内核的 file_operations 无 fadvise 字段，已禁用
-    // if (orig->f_op->fadvise) {
-    //     return orig->f_op->fadvise(orig, off1, off2, flags);
-    // }
-
-    return -EOPNOTSUPP;  // 或 -EINVAL，表示不支持这个操作
+    // 4.14 无 fadvise，直接返回不支持
+    return -EOPNOTSUPP;
 }
 
 static void ksu_release_file_wrapper(struct ksu_file_wrapper *data);
 
 static int ksu_wrapper_release(struct inode *inode, struct file *filp)
 {
-    // https://cs.android.com/android/kernel/superproject/+/common-android-mainline:common/fs/file_table.c;l=467-473;drc=3be0b283b562eabbc2b1f3bb534dc8903079bbaa
-    // f_op->release is called before fops_put(f_op), so we put it manually.
     fops_put(filp->f_op);
-    // prevent it from being put again
     filp->f_op = NULL;
     ksu_release_file_wrapper(filp->private_data);
     return 0;
@@ -384,31 +280,17 @@ static struct ksu_file_wrapper *ksu_create_file_wrapper(struct file *fp)
     p->ops.write = fp->f_op->write ? ksu_wrapper_write : NULL;
     p->ops.read_iter = fp->f_op->read_iter ? ksu_wrapper_read_iter : NULL;
     p->ops.write_iter = fp->f_op->write_iter ? ksu_wrapper_write_iter : NULL;
-    p->ops.iopoll = NULL;//4.14内核不支持iopoll
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0)
-    p->ops.iterate = fp->f_op->iterate ? ksu_wrapper_iterate : NULL;
-#endif
-    p->ops.iterate_shared =
-        fp->f_op->iterate_shared ? ksu_wrapper_iterate_shared : NULL;
     p->ops.poll = fp->f_op->poll ? ksu_wrapper_poll : NULL;
     p->ops.unlocked_ioctl =
         fp->f_op->unlocked_ioctl ? ksu_wrapper_unlocked_ioctl : NULL;
     p->ops.compat_ioctl =
         fp->f_op->compat_ioctl ? ksu_wrapper_compat_ioctl : NULL;
     p->ops.mmap = fp->f_op->mmap ? ksu_wrapper_mmap : NULL;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
-    p->ops.fop_flags = fp->f_op->fop_flags;
-#else
-    p->ops.mmap_supported_flags = 0;
-#endif
     p->ops.flush = fp->f_op->flush ? ksu_wrapper_flush : NULL;
     p->ops.release = ksu_wrapper_release;
     p->ops.fsync = fp->f_op->fsync ? ksu_wrapper_fsync : NULL;
     p->ops.fasync = fp->f_op->fasync ? ksu_wrapper_fasync : NULL;
     p->ops.lock = fp->f_op->lock ? ksu_wrapper_lock : NULL;
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0)
-    p->ops.sendpage = fp->f_op->sendpage ? ksu_wrapper_sendpage : NULL;
-#endif
     p->ops.get_unmapped_area =
         fp->f_op->get_unmapped_area ? ksu_wrapper_get_unmapped_area : NULL;
     p->ops.check_flags = fp->f_op->check_flags;
@@ -421,9 +303,12 @@ static struct ksu_file_wrapper *ksu_create_file_wrapper(struct file *fp)
     p->ops.show_fdinfo = fp->f_op->show_fdinfo ? ksu_wrapper_show_fdinfo : NULL;
     p->ops.copy_file_range =
         fp->f_op->copy_file_range ? ksu_wrapper_copy_file_range : NULL;
-    p->ops.remap_file_range =NULL;
-        fp->f_op->remap_file_range ? ksu_wrapper_remap_file_range : NULL;
+
+    // 所有 4.14 不支持的新字段全部设为 NULL 或 0
+    p->ops.iopoll = NULL;
+    p->ops.remap_file_range = NULL;
     p->ops.fadvise = NULL;
+    p->ops.mmap_supported_flags = 0;
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
     p->ops.splice_eof = fp->f_op->splice_eof ? ksu_wrapper_splice_eof : NULL;
@@ -457,76 +342,6 @@ static const struct dentry_operations ksu_file_wrapper_d_ops = {
     .d_release = ksu_wrapper_d_release
 };
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 8, 0)
-#define ksu_anon_inode_create_getfile_compat anon_inode_create_getfile
-#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 16, 0)
-#define ksu_anon_inode_create_getfile_compat anon_inode_getfile_secure
-#else
-// There is no anon_inode_create_getfile before 5.16, but it's not difficult to implement it.
-// https://cs.android.com/android/kernel/superproject/+/common-android12-5.10:common/fs/anon_inodes.c;l=58-125;drc=0d34ce8aa78e38affbb501690bcabec4df88620e
-
-// Borrow kernel's anon_inode_mnt, so that we don't need to mount one by ourselves.
-static struct vfsmount *anon_inode_mnt __read_mostly;
-
-static struct inode *
-ksu_anon_inode_make_secure_inode(const char *name,
-                                 const struct inode *context_inode)
-{
-    struct inode *inode;
-    const struct qstr qname = QSTR_INIT(name, strlen(name));
-    int error;
-
-    if (unlikely(!anon_inode_mnt)) {
-        return ERR_PTR(-ENODEV);
-    }
-
-    inode = alloc_anon_inode(anon_inode_mnt->mnt_sb);
-    if (IS_ERR(inode))
-        return inode;
-    inode->i_flags &= ~S_PRIVATE;
-    error = security_inode_init_security_anon(inode, &qname, context_inode);
-    if (error) {
-        iput(inode);
-        return ERR_PTR(error);
-    }
-    return inode;
-}
-
-static struct file *ksu_anon_inode_create_getfile_compat(
-    const char *name, const struct file_operations *fops, void *priv, int flags,
-    const struct inode *context_inode)
-{
-    struct inode *inode;
-    struct file *file;
-
-    if (fops->owner && !try_module_get(fops->owner))
-        return ERR_PTR(-ENOENT);
-
-    inode = ksu_anon_inode_make_secure_inode(name, context_inode);
-    if (IS_ERR(inode)) {
-        file = ERR_CAST(inode);
-        goto err;
-    }
-
-    file = alloc_file_pseudo(inode, anon_inode_mnt, name,
-                             flags & (O_ACCMODE | O_NONBLOCK), fops);
-    if (IS_ERR(file))
-        goto err_iput;
-
-    file->f_mapping = inode->i_mapping;
-
-    file->private_data = priv;
-
-    return file;
-
-err_iput:
-    iput(inode);
-err:
-    module_put(fops->owner);
-    return file;
-}
-#endif
-
 int ksu_install_file_wrapper(int fd)
 {
     int out_fd, ret;
@@ -548,28 +363,20 @@ int ksu_install_file_wrapper(int fd)
         goto out_put_fd;
     }
 
-    struct file *wrapper_file = ksu_anon_inode_create_getfile_compat(
-        "[ksu_fdwrapper]", &file_wrapper_data->ops, file_wrapper_data,
-        orig_file->f_flags, NULL);
+    struct file *wrapper_file = anon_inode_getfile("[ksu_fdwrapper]", &ksu_file_wrapper_inode_fops,
+                                                   file_wrapper_data, orig_file->f_flags);
     if (IS_ERR(wrapper_file)) {
         pr_err("ksu_fdwrapper: getfile failed: %ld\n", PTR_ERR(wrapper_file));
         ret = PTR_ERR(wrapper_file);
         goto out_release_wrapper;
     }
 
-    // Now do magic on inode and dentry.
-    // It should be safe to modify them since the file hasn't been published.
-
     struct inode *wrapper_inode = file_inode(wrapper_file);
-    // libc's stdio relies on the fstat() result of the fd to determine its buffer type.
     wrapper_inode->i_mode = file_inode(orig_file)->i_mode;
     struct inode_security_struct *wrapper_sec = selinux_inode(wrapper_inode);
-    // Use ksu_file_sid to bypass SELinux check.
-    // When we call `su` from terminal app, this is useful.
     if (wrapper_sec) {
         wrapper_sec->sid = ksu_file_sid;
     }
-    // Install open file operation for inode.
     wrapper_inode->i_fop = &ksu_file_wrapper_inode_fops;
 
     struct path *orig_path = kmalloc(sizeof(struct path), GFP_KERNEL);
@@ -579,8 +386,6 @@ int ksu_install_file_wrapper(int fd)
     }
     *orig_path = orig_file->f_path;
     path_get(orig_path);
-    // Some applications (such as screen) won't work if the tty's path is weird,
-    // Therefore, we use d_dname to spoof it to return the path to the original file.
     wrapper_file->f_path.dentry->d_fsdata = orig_path;
     wrapper_file->f_path.dentry->d_op = &ksu_file_wrapper_d_ops;
 
@@ -590,8 +395,6 @@ int ksu_install_file_wrapper(int fd)
 
 out_put_wrapper_file:
     fput(wrapper_file);
-    // file_wrapper will be released by fput
-    goto out_put_fd;
 out_release_wrapper:
     ksu_release_file_wrapper(file_wrapper_data);
 out_put_fd:
@@ -604,19 +407,5 @@ done:
 
 void ksu_file_wrapper_init(void)
 {
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 16, 0)
-    static const struct file_operations tmp = { .owner = THIS_MODULE };
-    struct file *dummy = anon_inode_getfile("dummy", &tmp, NULL, 0);
-    if (IS_ERR(dummy)) {
-        pr_err(
-            "file_wrapper: initialize anon_inode_mnt failed, can't get file: %ld\n",
-            PTR_ERR(dummy));
-        return;
-    }
-    anon_inode_mnt = dummy->f_path.mnt;
-    if (unlikely(!anon_inode_mnt)) {
-        pr_err("file_wrapper: initialize anon_inode_mnt failed, got NULL\n");
-    }
-    fput(dummy);
-#endif
+    // 4.14 不需要特殊初始化
 }
