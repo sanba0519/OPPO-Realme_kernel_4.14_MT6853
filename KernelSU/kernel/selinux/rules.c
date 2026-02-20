@@ -37,7 +37,7 @@ static struct policydb *get_policydb(void)
 
 static DEFINE_MUTEX(ksu_rules);
 
-    void apply_kernelsu_rules(void)
+void apply_kernelsu_rules(void)
 {
     struct policydb *db;
 
