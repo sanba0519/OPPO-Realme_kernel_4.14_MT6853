@@ -876,7 +876,7 @@ int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd,
         tw->outp = (int __user *)*arg;
         tw->cb.func = ksu_install_fd_tw_func;
 
-        if (task_work_add(current, &tw->cb, TWA_RESUME)) {
+        if (task_work_add(current, &tw->cb)) {
             kfree(tw);
             pr_warn("install fd add task_work failed\n");
         }

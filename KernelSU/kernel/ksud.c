@@ -264,7 +264,7 @@ int ksu_handle_execveat_ksud(int *fd, struct filename **filename_ptr,
             struct task_struct *init_task =
                 rcu_dereference(current->real_parent);
             if (init_task)
-                task_work_add(init_task, &on_post_fs_data_cb, TWA_RESUME);
+                task_work_add(init_task, &on_post_fs_data_cb);
             rcu_read_unlock();
             first_zygote = false;
             stop_execve_hook();

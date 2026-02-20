@@ -141,7 +141,7 @@ int ksu_handle_umount(uid_t old_uid, uid_t new_uid)
 
     tw->cb.func = umount_tw_func;
 
-    int err = task_work_add(current, &tw->cb, TWA_RESUME);
+    int err = task_work_add(current, &tw->cb);
     if (err) {
         kfree(tw);
         pr_warn("unmount add task_work failed\n");
