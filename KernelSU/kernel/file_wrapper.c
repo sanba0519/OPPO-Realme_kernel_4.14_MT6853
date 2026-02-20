@@ -389,14 +389,22 @@ int ksu_install_file_wrapper(int fd)
 
     // 4.14 上没有 selinux_inode 函数，改用标准方式获取
     struct inode_security_struct *wrapper_sec = NULL;
+
     #if LINUX_VERSION_CODE >= KERNEL_VERSION(5,0,0)
         wrapper_sec = selinux_inode(wrapper_inode);
     #else
-        // 老内核手动获取（从 inode->i_security）
-        wrapper_sec = inode->i_security;
+        // 4.14 手动从 inode->i_security 获取
+        if (wrapper_inode) {
+            wrapper_sec = wrapper_inode->i_security;
+        } else {
+            pr_warn("SukiSU: wrapper_inode is NULL on 4.14\n");
+            // 根据函数返回类型决定 return -EINVAL; 或继续
+            return -EINVAL;  // 或 return 0;
+        }
+
         if (!wrapper_sec) {
-            pr_warn("SukiSU: failed to get inode security on 4.14\n");
-            return -EINVAL;  // 或继续，根据上下文决定
+            pr_warn("SukiSU: inode->i_security is NULL on 4.14\n");
+            return -ENOENT;  // 或 return 0;
         }
     #endif
     
