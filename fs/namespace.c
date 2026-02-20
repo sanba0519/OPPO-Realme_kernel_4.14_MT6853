@@ -26,7 +26,7 @@
 #include <linux/bootmem.h>
 #include <linux/task_work.h>
 #include <linux/sched/task.h>
-
+#include <linux/version.h>  //grok添加 稍稍保留 umount 功能 第3597行
 #include "pnode.h"
 #include "internal.h"
 #ifdef CONFIG_OPLUS_SECURE_GUARD
@@ -3595,24 +3595,46 @@ const struct proc_ns_operations mntns_operations = {
 	.owner		= mntns_owner,
 };
 //稍稍保留 umount 功能 by Gork
+// Backport path_umount for old kernels (4.14)
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5,9,0)
+
+static int can_umount(const struct path *path, int flags)
+{
+    struct mount *mnt = real_mount(path->mnt);
+
+    if (!may_mount())
+        return -EPERM;
+
+    if (path->dentry != path->mnt->mnt_root)
+        return -EINVAL;
+
+    if (!check_mnt(mnt))
+        return -EINVAL;
+
+    if (mnt->mnt.mnt_flags & MNT_LOCKED)  // optimistic check
+        return -EINVAL;
+
+    if ((flags & MNT_FORCE) && !capable(CAP_SYS_ADMIN))
+        return -EPERM;
+
+    return 0;
+}
+
 int path_umount(struct path *path, int flags)
 {
     struct mount *mnt = real_mount(path->mnt);
     int ret;
 
-    if (flags & UMOUNT_NOFOLLOW)
-        return -EINVAL;
-
-    if (path->dentry != mnt->mnt.mnt_root)
-        return -EINVAL;
+    ret = can_umount(path, flags);
+    if (ret)
+        return ret;
 
     ret = do_umount(mnt, flags);
-    if (!ret) {
-        dput(path->dentry);
-        mntput_no_expire(mnt);
-    }
+
+    dput(path->dentry);
+    mntput_no_expire(mnt);
 
     return ret;
 }
+
 #endif

@@ -36,18 +36,16 @@ static struct policydb *get_policydb(void)
 
 static DEFINE_MUTEX(ksu_rules);
 
-void apply_kernelsu_rules()
-{
     static int apply_kernelsu_rules(void)
 {
     pr_info("SukiSU: apply_kernelsu_rules skipped on 4.14 (policydb not exported)\n");
     return 0;   // 直接返回，不注入规则
     
-    struct policydb *db;
+    //struct policydb *db;
 
-    if (!getenforce()) {
-        pr_info("SELinux permissive or disabled, apply rules!\n");
-    }
+    //if (!getenforce()) {
+      //  pr_info("SELinux permissive or disabled, apply rules!\n");
+    //}
 
     mutex_lock(&ksu_rules);
 
@@ -150,14 +148,22 @@ static int get_object(char *buf, char __user *user_object, size_t buf_sz,
         return 0;
     }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5,8,0)
+    // 4.14 用 strncpy_from_unsafe 兼容
+    if (strncpy_from_unsafe(buf, user_object, buf_sz) < 0) {
+        return -EINVAL;
+    }
+#else
     if (strncpy_from_user(buf, user_object, buf_sz) < 0) {
         return -EINVAL;
     }
+#endif
 
     *object = buf;
 
     return 0;
 }
+
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 4, 0))
 extern int avc_ss_reset(u32 seqno);
 #else
@@ -447,8 +453,12 @@ exit:
     mutex_unlock(&ksu_rules);
 
     // only allow and xallow needs to reset avc cache, but we cannot do that because
-    // we are in atomic context. so we just reset it every time.
+    // we are in atomic context. so we just reset it every time (skip on old kernel)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,0,0)
     reset_avc_cache();
+#else
+    pr_info("SukiSU: reset_avc_cache skipped in atomic context on 4.14\n");
+#endif
 
     return ret;
 }
