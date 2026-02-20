@@ -27,30 +27,15 @@ static int transive_to_domain(const char *domain, struct cred *cred)
 {
     u32 sid;
     int error;
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 18, 0)
-    struct task_security_struct *tsec;
-#else
-    struct cred_security_struct *tsec;
-#endif
-    // tsec = selinux_cred(cred);
 
-// 4.14 上没有 selinux_cred 函数，手动从 cred->security 获取
-    struct task_security_struct *tsec = NULL;
-    #if LINUX_VERSION_CODE >= KERNEL_VERSION(5,0,0)
-        tsec = selinux_cred(cred);
-    #else
-        tsec = cred->security;  // 老内核 cred->security 就是 task_security_struct *
-        if (!tsec) {
-            pr_warn("SukiSU: cred->security is NULL on 4.14\n");
-            // 根据上下文决定 return 或继续
-            // return -ENOENT;  // 或 return 0; 看函数返回类型
-        }
-    #endif
-    
+    // 4.14 上没有 selinux_cred 函数，手动从 cred->security 获取
+    const struct task_security_struct *tsec = (const struct task_security_struct *)cred->security;
+
     if (!tsec) {
-        pr_err("tsec == NULL!\n");
+        pr_warn("SukiSU: cred->security is NULL in transive_to_domain\n");
         return -1;
     }
+
     error = security_secctx_to_secid(domain, strlen(domain), &sid);
     if (error) {
         pr_info("security_secctx_to_secid %s -> sid: %d, error: %d\n", domain,
@@ -177,21 +162,19 @@ static bool is_sid_match(const struct cred *cred, u32 cached_sid,
     if (!cred) {
         return false;
     }
-const struct task_security_struct *tsec = (const struct task_security_struct *)cred->security;
 
-// 4.14 fallback: 从 cred->security 获取 tsec
-const struct task_security_struct *tsec = (const struct task_security_struct *)cred->security;
+    // 4.14 fallback: 从 cred->security 获取 tsec
+    const struct task_security_struct *tsec = (const struct task_security_struct *)cred->security;
 
-if (!tsec) {
-    pr_warn("SukiSU: cred->security is NULL in selinux_cred fallback\n");
-    return false;  // 安全返回 false，避免空指针崩溃
-}
+    if (!tsec) {
+        pr_warn("SukiSU: cred->security is NULL in is_sid_match\n");
+        return false;
+    }
 
-// Fast path: use cached SID if available
-if (likely(cached_sid != 0)) {
-    return tsec->sid == cached_sid;
-}
-
+    // Fast path: use cached SID if available
+    if (likely(cached_sid != 0)) {
+        return tsec->sid == cached_sid;
+    }
 
     // Slow path fallback: string comparison (only before cache is initialized)
     struct lsm_context ctx;
