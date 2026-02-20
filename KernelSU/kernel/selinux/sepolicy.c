@@ -2,7 +2,7 @@
 #include <linux/printk.h>
 #include <linux/slab.h>
 #include <linux/version.h>
-
+#include <linux/printk.h> //新加
 #include "sepolicy.h"
 #include "../klog.h" // IWYU pragma: keep
 #include "ss/symtab.h"
@@ -68,7 +68,7 @@ static bool add_typeattribute(struct policydb *db, const char *type,
 
 // htable is a struct instead of pointer above 5.8.0:
 // https://elixir.bootlin.com/linux/v5.8-rc1/source/security/selinux/ss/symtab.h
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
 #define ksu_hashtab_for_each(htab, cur)                                        \
     ksu_hash_for_each(htab.htable, htab.size, cur)
 #else
@@ -497,51 +497,59 @@ static bool add_filename_trans(struct policydb *db, const char *s,
         return false;
     }
     cls = symtab_search(&db->p_classes, c);
-    if (cls == NULL) {
-        pr_warn("class %s does not exist\n", c);
-        return false;
-    }
-    def = symtab_search(&db->p_types, d);
-    if (def == NULL) {
-        pr_warn("default type %s does not exist\n", d);
-        return false;
-    }
+if (cls == NULL) {
+    pr_warn("class %s does not exist\n", c);
+    return false;
+}
+def = symtab_search(&db->p_types, d);
+if (def == NULL) {
+    pr_warn("default type %s does not exist\n", d);
+    return false;
+}
 
-    struct filename_trans_key key;
-    key.ttype = tgt->value;
-    key.tclass = cls->value;
-    key.name = (char *)o;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,4,0)
+// ==================== 新内核（5.4+）用原逻辑 ====================
+struct filename_trans_key key;
+key.ttype = tgt->value;
+key.tclass = cls->value;
+key.name = (char *)o;
 
-    struct filename_trans_datum *last = NULL;
+struct filename_trans_datum *last = NULL;
 
-    struct filename_trans_datum *trans = policydb_filenametr_search(db, &key);
-    while (trans) {
-        if (ebitmap_get_bit(&trans->stypes, src->value - 1)) {
-            // Duplicate, overwrite existing data and return
-            trans->otype = def->value;
-            return true;
-        }
-        if (trans->otype == def->value)
-            break;
-        last = trans;
-        trans = trans->next;
-    }
-
-    if (trans == NULL) {
-        trans = (struct filename_trans_datum *)kcalloc(1, sizeof(*trans),
-                                                       GFP_ATOMIC);
-        struct filename_trans_key *new_key =
-            (struct filename_trans_key *)kzalloc(sizeof(*new_key), GFP_ATOMIC);
-        *new_key = key;
-        new_key->name = kstrdup(key.name, GFP_ATOMIC);
-        trans->next = last;
+struct filename_trans_datum *trans = policydb_filenametr_search(db, &key);
+while (trans) {
+    if (ebitmap_get_bit(&trans->stypes, src->value - 1)) {
+        // Duplicate, overwrite existing data and return
         trans->otype = def->value;
-        hashtab_insert(&db->filename_trans, new_key, trans,
-                       filenametr_key_params);
+        return true;
     }
+    if (trans->otype == def->value)
+        break;
+    last = trans;
+    trans = trans->next;
+}
 
-    db->compat_filename_trans_count++;
-    return ebitmap_set_bit(&trans->stypes, src->value - 1, 1) == 0;
+if (trans == NULL) {
+    trans = (struct filename_trans_datum *)kcalloc(1, sizeof(*trans),
+                                                   GFP_ATOMIC);
+    struct filename_trans_key *new_key =
+        (struct filename_trans_key *)kzalloc(sizeof(*new_key), GFP_ATOMIC);
+    *new_key = key;
+    new_key->name = kstrdup(key.name, GFP_ATOMIC);
+    trans->next = last;
+    trans->otype = def->value;
+    hashtab_insert(&db->filename_trans, new_key, trans,
+                   filenametr_key_params);
+}
+
+db->compat_filename_trans_count++;
+return ebitmap_set_bit(&trans->stypes, src->value - 1, 1) == 0;
+// =================================================================
+#else
+// ==================== 老内核（4.14）直接跳过，不注入 ====================
+pr_info("SukiSU: filename transition rule skipped (kernel too old, < 5.4)\n");
+return true;  // 返回成功，避免上层认为失败而反复尝试
+#endif
 }
 
 static bool add_genfscon(struct policydb *db, const char *fs_name,
@@ -608,39 +616,73 @@ static bool add_type(struct policydb *db, const char *type_name, bool attr)
         return false;
     }
 
-    struct ebitmap *new_type_attr_map_array =
-        ksu_kvrealloc(db->type_attr_map_array, value * sizeof(struct ebitmap),
-                      (value - 1) * sizeof(struct ebitmap));
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,15,0)
+// ==================== 新内核（4.15+）用原逻辑 ====================
+struct ebitmap *new_type_attr_map_array =
+    ksu_kvrealloc(db->type_attr_map_array, value * sizeof(struct ebitmap),
+                  (value - 1) * sizeof(struct ebitmap));
 
-    if (!new_type_attr_map_array) {
-        pr_err("add_type: alloc type_attr_map_array failed\n");
-        return false;
-    }
+if (!new_type_attr_map_array) {
+    pr_err("add_type: alloc type_attr_map_array failed\n");
+    return false;
+}
 
-    struct type_datum **new_type_val_to_struct =
-        ksu_kvrealloc(db->type_val_to_struct,
-                      sizeof(*db->type_val_to_struct) * value,
-                      sizeof(*db->type_val_to_struct) * (value - 1));
+struct type_datum **new_type_val_to_struct =
+    ksu_kvrealloc(db->type_val_to_struct,
+                  sizeof(*db->type_val_to_struct) * value,
+                  sizeof(*db->type_val_to_struct) * (value - 1));
 
-    if (!new_type_val_to_struct) {
-        pr_err("add_type: alloc type_val_to_struct failed\n");
-        return false;
-    }
+if (!new_type_val_to_struct) {
+    pr_err("add_type: alloc type_val_to_struct failed\n");
+    return false;
+}
 
-    char **new_val_to_name_types =
-        ksu_kvrealloc(db->sym_val_to_name[SYM_TYPES], sizeof(char *) * value,
-                      sizeof(char *) * (value - 1));
-    if (!new_val_to_name_types) {
-        pr_err("add_type: alloc val_to_name failed\n");
-        return false;
-    }
+char **new_val_to_name_types =
+    ksu_kvrealloc(db->sym_val_to_name[SYM_TYPES], sizeof(char *) * value,
+                  sizeof(char *) * (value - 1));
+if (!new_val_to_name_types) {
+    pr_err("add_type: alloc val_to_name failed\n");
+    return false;
+}
 
-    db->type_attr_map_array = new_type_attr_map_array;
-    ebitmap_init(&db->type_attr_map_array[value - 1]);
-    ebitmap_set_bit(&db->type_attr_map_array[value - 1], value - 1, 1);
+db->type_attr_map_array = new_type_attr_map_array;
+ebitmap_init(&db->type_attr_map_array[value - 1]);
+ebitmap_set_bit(&db->type_attr_map_array[value - 1], value - 1, 1);
 
-    db->type_val_to_struct = new_type_val_to_struct;
-    db->type_val_to_struct[value - 1] = type;
+db->type_val_to_struct = new_type_val_to_struct;
+db->type_val_to_struct[value - 1] = type;
+// =================================================================
+#else
+// ==================== 老内核（4.14）跳过 type_val_to_struct 等扩展 ====================
+pr_info("SukiSU: Skipping type_val_to_struct / attr_map extension on old kernel < 4.15\n");
+
+// 仍然保持 type_attr_map_array 的扩展（这个在 4.14 很可能存在）
+struct ebitmap *new_type_attr_map_array =
+    ksu_kvrealloc(db->type_attr_map_array, value * sizeof(struct ebitmap),
+                  (value - 1) * sizeof(struct ebitmap));
+
+if (!new_type_attr_map_array) {
+    pr_err("add_type: alloc type_attr_map_array failed\n");
+    return false;
+}
+
+db->type_attr_map_array = new_type_attr_map_array;
+ebitmap_init(&db->type_attr_map_array[value - 1]);
+ebitmap_set_bit(&db->type_attr_map_array[value - 1], value - 1, 1);
+
+// sym_val_to_name[SYM_TYPES] 的扩展也保留（老内核有这个）
+char **new_val_to_name_types =
+    ksu_kvrealloc(db->sym_val_to_name[SYM_TYPES], sizeof(char *) * value,
+                  sizeof(char *) * (value - 1));
+if (!new_val_to_name_types) {
+    pr_err("add_type: alloc val_to_name failed\n");
+    return false;
+}
+
+// 不碰 type_val_to_struct，因为不存在
+
+// 返回成功，继续后续逻辑
+#endif
 
     db->sym_val_to_name[SYM_TYPES] = new_val_to_name_types;
     db->sym_val_to_name[SYM_TYPES][value - 1] = key;
