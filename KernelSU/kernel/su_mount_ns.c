@@ -201,7 +201,7 @@ void setup_mount_ns(int32_t ns_mode)
     }
     tw->cb.func = ksu_setup_mount_ns_tw_func;
     tw->ns_mode = ns_mode;
-    if (task_work_add(current, &tw->cb)) {
+    if (task_work_add(current, &tw->cb,false)) {
         kfree(tw);
         pr_err("add task work failed! skip mnt_ns magic for pid: %d.\n",
                current->pid);
