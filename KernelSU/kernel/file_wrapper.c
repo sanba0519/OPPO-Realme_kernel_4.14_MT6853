@@ -297,13 +297,24 @@ static struct ksu_file_wrapper *ksu_create_file_wrapper(struct file *fp)
     p->ops.setlease = NULL;  // 4.14 无或不兼容
     p->ops.fallocate = fp->f_op->fallocate ? ksu_wrapper_fallocate : NULL;
     p->ops.show_fdinfo = fp->f_op->show_fdinfo ? ksu_wrapper_show_fdinfo : NULL;
-    p->ops.copy_file_range = NULL;  // 4.14 无
+// --- 针对老版本内核的兼容性处理 ---
+    // 4.14 内核没有这些成员，通过版本号判断来屏蔽
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 20, 0)
+    p->ops.copy_file_range = fp->f_op->copy_file_range ? ksu_wrapper_copy_file_range : NULL;
+    p->ops.remap_file_range = fp->f_op->remap_file_range ? ksu_wrapper_remap_file_range : NULL;
+#endif
 
-    // 强制禁用新字段
-    p->ops.iopoll = NULL;
-    p->ops.remap_file_range = NULL;
-    p->ops.fadvise = NULL;
-    p->ops.mmap_supported_flags = 0;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0)
+    p->ops.iopoll = fp->f_op->iopoll ? ksu_wrapper_iopoll : NULL;
+#endif
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 11, 0)
+    p->ops.fadvise = fp->f_op->fadvise ? ksu_wrapper_fadvise : NULL;
+#endif
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
+    p->ops.mmap_supported_flags = fp->f_op->mmap_supported_flags;
+#endif
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
     p->ops.splice_eof = fp->f_op->splice_eof ? ksu_wrapper_splice_eof : NULL;
@@ -311,6 +322,12 @@ static struct ksu_file_wrapper *ksu_create_file_wrapper(struct file *fp)
 
     return p;
 }
+
+    // 强制禁用新字段
+    /*p->ops.iopoll = NULL;
+    p->ops.remap_file_range = NULL;
+    p->ops.fadvise = NULL;
+    p->ops.mmap_supported_flags = 0;*/
 
 static void ksu_release_file_wrapper(struct ksu_file_wrapper *data)
 {
