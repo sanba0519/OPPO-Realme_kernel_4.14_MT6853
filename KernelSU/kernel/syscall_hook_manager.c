@@ -241,11 +241,11 @@ static inline bool check_syscall_fastpath(int nr)
     case __NR_execve:
     case __NR_setresuid:
     case __NR_clone:
-    case __NR_clone3:
-        return true;
-    default:
-        return false;
-    }
+    //case __NR_clone3://4.14内核无
+        //return true;
+    //default:
+       // return false;
+   // }
 }
 
 // Unmark init's child that are not zygote, adbd or ksud
@@ -339,7 +339,7 @@ static void ksu_sys_enter_handler(void *data, struct pt_regs *regs, long id)
 
 #ifdef CONFIG_KSU_MANUAL_SU
         // Handle task_alloc via clone/fork
-        if (id == __NR_clone || id == __NR_clone3)
+        if (id == __NR_clone/* || id == __NR_clone3*/)//做4.14内核处理
             return ksu_handle_task_alloc(regs);
 #endif
     }
