@@ -33,20 +33,26 @@ extern long __x64_sys_setns(const struct pt_regs *regs);
 
 static long ksu_sys_setns(int fd, int flags)
 {
-    struct pt_regs regs;
-    memset(&regs, 0, sizeof(regs));
-
-    PT_REGS_PARM1(&regs) = fd;
-    PT_REGS_PARM2(&regs) = flags;
+    long ret;
 
 #if defined(__aarch64__)
-    extern long sys_setns(int fd, unsigned int nstype); //做处理
-    sys_setns(fd, nstype);                              //做处理
+    // 4.14 arm64 内核直接调用 sys_setns 系统调用
+    ret = sys_setns(fd, flags);
+    if (ret) {
+        pr_warn("SukiSU: sys_setns(%d, %d) failed: %ld\n", fd, flags, ret);
+    }
 #elif defined(__x86_64__)
-    return __x64_sys_setns(&regs);
+    // x86_64 如果需要，用 pt_regs 调用（但你的机型是 arm64，可注释或删除）
+    struct pt_regs regs;
+    memset(&regs, 0, sizeof(regs));
+    regs.di = fd;
+    regs.si = flags;
+    ret = __x64_sys_setns(&regs);
 #else
-#error "Unsupported arch"
+    #error "Unsupported architecture for ksu_sys_setns"
 #endif
+
+    return ret;
 }
 
 // global mode , need CAP_SYS_ADMIN and CAP_SYS_CHROOT to perform setns
@@ -118,29 +124,41 @@ try_setns:
 
     fd_install(fd, ns_file);
     ret = ksu_sys_setns(fd, CLONE_NEWNS);
+long ret;
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 11, 0)
-    extern long sys_close(unsigned int fd);//做处理
-    sys_close(fd);//做处理
+// 先处理 setns（假设这是 setns 的调用部分）
+ret = sys_setns(fd, nstype);  // nstype 是 flags 或 CLONE_NEWNS 等，根据上下文替换
+if (ret) {
+    pr_warn("SukiSU: sys_setns failed: %ld\n", ret);
+    goto out;
+}
+
+// setns 成功后，处理 close(fd)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5,11,0)
+    // 4.14 用 sys_close
+    ret = sys_close(fd);
+    if (ret) {
+        pr_warn("SukiSU: sys_close failed: %ld\n", ret);
+    }
 #else
-    ksys_close(fd);
+    // 新内核用 ksys_close
+    ret = ksys_close(fd);
+    if (ret) {
+        pr_warn("SukiSU: ksys_close failed: %ld\n", ret);
+    }
 #endif
 
-    if (ret) {
-        pr_warn("call setns failed: %ld\n", ret);
-        goto out;
+// try to restore working directory using absolute path after setns
+if (pwd_path) {
+    struct path new_pwd;
+    int err = kern_path(pwd_path, 0, &new_pwd);
+    if (!err) {
+        set_fs_pwd(current->fs, &new_pwd);
+        path_put(&new_pwd);
+    } else {
+        pr_warn("restore pwd failed: %d, path: %s\n", err, pwd_path);
     }
-    // try to restore working directory using absolute path after setns
-    if (pwd_path) {
-        struct path new_pwd;
-        int err = kern_path(pwd_path, 0, &new_pwd);
-        if (!err) {
-            set_fs_pwd(current->fs, &new_pwd);
-            path_put(&new_pwd);
-        } else {
-            pr_warn("restore pwd failed: %d, path: %s\n", err, pwd_path);
-        }
-    }
+}
 out:
     kfree(pwd_buf);
 }
