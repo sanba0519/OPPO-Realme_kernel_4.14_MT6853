@@ -124,31 +124,34 @@ try_setns:
 
     fd_install(fd, ns_file);
     ret = ksu_sys_setns(fd, CLONE_NEWNS);
-long ret;
 
-// 先处理 setns（假设这是 setns 的调用部分）
-ret = sys_setns(fd, nstype);  // nstype 是 flags 或 CLONE_NEWNS 等，根据上下文替换
+
+// 假设前面的 ns_get_path 已经用了 ret，这里继续用同一个 ret
+ret = ns_get_path(&ns_path, pid1_task, &mntns_operations);
+if (ret) {
+    pr_warn("ns_get_path failed: %ld\n", ret);
+    goto out;
+}
+
+
+// setns 调用（复用原来的 ret）
+ret = sys_setns(fd, flags);  // 注意：这里用 flags（或 nstype，根据你的函数参数）
 if (ret) {
     pr_warn("SukiSU: sys_setns failed: %ld\n", ret);
     goto out;
 }
 
-// setns 成功后，处理 close(fd)
+// close(fd) 调用（继续复用 ret）
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5,11,0)
-    // 4.14 用 sys_close
     ret = sys_close(fd);
     if (ret) {
         pr_warn("SukiSU: sys_close failed: %ld\n", ret);
     }
 #else
-    // 新内核用 ksys_close
-    ret = ksys_close(fd);
-    if (ret) {
-        pr_warn("SukiSU: ksys_close failed: %ld\n", ret);
-    }
+    ksys_close(fd);
 #endif
 
-// try to restore working directory using absolute path after setns
+// try to restore working directory...
 if (pwd_path) {
     struct path new_pwd;
     int err = kern_path(pwd_path, 0, &new_pwd);
@@ -159,6 +162,7 @@ if (pwd_path) {
         pr_warn("restore pwd failed: %d, path: %s\n", err, pwd_path);
     }
 }
+
 out:
     kfree(pwd_buf);
 }
