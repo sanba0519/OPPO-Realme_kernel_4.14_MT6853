@@ -281,30 +281,25 @@ static struct ksu_file_wrapper *ksu_create_file_wrapper(struct file *fp)
     p->ops.read_iter = fp->f_op->read_iter ? ksu_wrapper_read_iter : NULL;
     p->ops.write_iter = fp->f_op->write_iter ? ksu_wrapper_write_iter : NULL;
     p->ops.poll = fp->f_op->poll ? ksu_wrapper_poll : NULL;
-    p->ops.unlocked_ioctl =
-        fp->f_op->unlocked_ioctl ? ksu_wrapper_unlocked_ioctl : NULL;
-    p->ops.compat_ioctl =
-        fp->f_op->compat_ioctl ? ksu_wrapper_compat_ioctl : NULL;
+    p->ops.unlocked_ioctl = fp->f_op->unlocked_ioctl ? ksu_wrapper_unlocked_ioctl : NULL;
+    p->ops.compat_ioctl = fp->f_op->compat_ioctl ? ksu_wrapper_compat_ioctl : NULL;
     p->ops.mmap = fp->f_op->mmap ? ksu_wrapper_mmap : NULL;
     p->ops.flush = fp->f_op->flush ? ksu_wrapper_flush : NULL;
     p->ops.release = ksu_wrapper_release;
     p->ops.fsync = fp->f_op->fsync ? ksu_wrapper_fsync : NULL;
     p->ops.fasync = fp->f_op->fasync ? ksu_wrapper_fasync : NULL;
     p->ops.lock = fp->f_op->lock ? ksu_wrapper_lock : NULL;
-    p->ops.get_unmapped_area =
-        fp->f_op->get_unmapped_area ? ksu_wrapper_get_unmapped_area : NULL;
+    p->ops.get_unmapped_area = fp->f_op->get_unmapped_area ? ksu_wrapper_get_unmapped_area : NULL;
     p->ops.check_flags = fp->f_op->check_flags;
     p->ops.flock = fp->f_op->flock ? ksu_wrapper_flock : NULL;
-    p->ops.splice_write =
-        fp->f_op->splice_write ? ksu_wrapper_splice_write : NULL;
+    p->ops.splice_write = fp->f_op->splice_write ? ksu_wrapper_splice_write : NULL;
     p->ops.splice_read = fp->f_op->splice_read ? ksu_wrapper_splice_read : NULL;
-    p->ops.setlease = fp->f_op->setlease ? ksu_wrapper_setlease : NULL;
+    p->ops.setlease = NULL;  // 4.14 无或不兼容
     p->ops.fallocate = fp->f_op->fallocate ? ksu_wrapper_fallocate : NULL;
     p->ops.show_fdinfo = fp->f_op->show_fdinfo ? ksu_wrapper_show_fdinfo : NULL;
-    p->ops.copy_file_range =
-        fp->f_op->copy_file_range ? ksu_wrapper_copy_file_range : NULL;
+    p->ops.copy_file_range = NULL;  // 4.14 无
 
-    // 所有 4.14 不支持的新字段全部设为 NULL 或 0
+    // 强制禁用新字段
     p->ops.iopoll = NULL;
     p->ops.remap_file_range = NULL;
     p->ops.fadvise = NULL;
