@@ -3594,3 +3594,25 @@ const struct proc_ns_operations mntns_operations = {
 	.install	= mntns_install,
 	.owner		= mntns_owner,
 };
+//稍稍保留 umount 功能 by Gork
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5,9,0)
+int path_umount(struct path *path, int flags)
+{
+    struct mount *mnt = real_mount(path->mnt);
+    int ret;
+
+    if (flags & UMOUNT_NOFOLLOW)
+        return -EINVAL;
+
+    if (path->dentry != mnt->mnt.mnt_root)
+        return -EINVAL;
+
+    ret = do_umount(mnt, flags);
+    if (!ret) {
+        dput(path->dentry);
+        mntput_no_expire(mnt);
+    }
+
+    return ret;
+}
+#endif

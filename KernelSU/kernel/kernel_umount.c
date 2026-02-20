@@ -41,11 +41,20 @@ static const struct ksu_feature_handler kernel_umount_handler = {
     .set_handler = kernel_umount_feature_set,
 };
 
-extern int path_umount(struct path *path, int flags);
+// 保留 extern 声明（如果文件里有的话，保持原样或注释掉，因为我们不用新版 path_umount）
+// extern int path_umount(struct path *path, int flags);   ← 可以注释掉或删掉
 
 static void ksu_umount_mnt(struct path *path, int flags)
 {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,9,0)
+    // 新内核用原函数
     int err = path_umount(path, flags);
+#else
+    // 4.14 内核：跳过或用旧方式（do_umount），这里直接失败并日志
+    int err = -ENOSYS;  // 表示不支持
+    pr_info("SukiSU: path_umount skipped on 4.14 kernel (old kernel, umount modules disabled)\n");
+#endif
+
     if (err) {
         pr_info("umount %s failed: %d\n", path->dentry->d_iname, err);
     }

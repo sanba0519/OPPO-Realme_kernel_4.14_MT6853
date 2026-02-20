@@ -105,18 +105,7 @@ static struct watch_dir g_watch = { .path = "/data/system",
 
 int ksu_observer_init(void)
 {
-    int ret = 0;
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
-    g = fsnotify_alloc_group(&ksu_ops, 0);
-#else
-    g = fsnotify_alloc_group(&ksu_ops);
-#endif
-    if (IS_ERR(g))
-        return PTR_ERR(g);
-
-    ret = watch_one_dir(&g_watch);
-    pr_info("observer init done\n");
+    pr_info("SukiSU: pkg_observer disabled on 4.14 kernel\n");// 直接返回成功，不启用监控
     return 0;
 }
 

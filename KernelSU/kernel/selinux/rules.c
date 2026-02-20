@@ -38,6 +38,11 @@ static DEFINE_MUTEX(ksu_rules);
 
 void apply_kernelsu_rules()
 {
+    static int apply_kernelsu_rules(void)
+{
+    pr_info("SukiSU: apply_kernelsu_rules skipped on 4.14 (policydb not exported)\n");
+    return 0;   // 直接返回，不注入规则
+    
     struct policydb *db;
 
     if (!getenforce()) {

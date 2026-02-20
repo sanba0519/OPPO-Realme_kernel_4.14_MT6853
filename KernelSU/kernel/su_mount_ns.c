@@ -19,6 +19,7 @@
 #include "klog.h" // IWYU pragma: keep
 #include "ksu.h"
 #include "su_mount_ns.h"
+#include "compat.h"
 
 extern int path_mount(const char *dev_name, struct path *path,
                       const char *type_page, unsigned long flags,
@@ -118,9 +119,9 @@ try_setns:
     ret = ksu_sys_setns(fd, CLONE_NEWNS);
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5, 11, 0)
-    ksys_close(fd);
-#else
     close_fd(fd);
+#else
+    ksys_close(fd);
 #endif
 
     if (ret) {
@@ -145,7 +146,7 @@ out:
 // individual mode , need CAP_SYS_ADMIN to perform unshare and remount
 static void ksu_mnt_ns_individual(void)
 {
-    long ret = ksys_unshare(CLONE_NEWNS);
+    long ret = sys_unshare(CLONE_NEWNS);
     if (ret) {
         pr_warn("call ksys_unshare failed: %ld\n", ret);
         return;
@@ -154,7 +155,13 @@ static void ksu_mnt_ns_individual(void)
     // make root mount private
     struct path root_path;
     get_fs_root(current->fs, &root_path);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,9,0)
     int pm_ret = path_mount(NULL, &root_path, NULL, MS_PRIVATE | MS_REC, NULL);
+#else
+    pr_info("SukiSU: path_mount skipped on 4.14\n");
+    int pm_ret = -ENOSYS;
+#endif
+
     path_put(&root_path);
 
     if (pm_ret < 0) {

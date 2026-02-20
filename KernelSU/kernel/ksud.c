@@ -18,6 +18,7 @@
 #include <linux/workqueue.h>
 #include <linux/uio.h>
 
+#include "compat.h"
 #include "manager.h"
 #include "allowlist.h"
 #include "arch.h"

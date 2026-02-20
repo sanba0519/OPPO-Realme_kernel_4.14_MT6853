@@ -4,6 +4,7 @@
 #include <asm/current.h>
 
 #include "util.h"
+#include "compat.h"
 
 bool try_set_access_flag(unsigned long addr)
 {
