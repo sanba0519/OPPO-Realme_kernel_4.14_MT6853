@@ -1,423 +1,115 @@
-//由grok重构  --26.2.21 15:16
-#include "linux/compiler.h"
-#include "linux/cred.h"
-#include "linux/printk.h"
-#include "selinux/selinux.h"
+#include <linux/compiler.h>
+#include <linux/cred.h>
+#include <linux/printk.h>
 #include <linux/spinlock.h>
-#include <linux/kprobes.h>
 #include <linux/tracepoint.h>
 #include <asm/syscall.h>
-#include <linux/slab.h>
 #include <linux/ptrace.h>
 #include <trace/events/syscalls.h>
-#include <linux/namei.h>
+#include <linux/version.h>
+#include <asm/unistd.h>
 
 #include "allowlist.h"
 #include "arch.h"
-#include "klog.h" // IWYU pragma: keep
 #include "syscall_hook_manager.h"
 #include "sucompat.h"
 #include "setuid_hook.h"
-#include "selinux/selinux.h"
 #include "util.h"
 #include "ksud.h"
-#include <linux/uaccess.h>
-#include <linux/version.h>
-#include <asm/unistd.h>
-#include <asm/ptrace.h>
 
-// Tracepoint registration count management
-// == 1: just us
-// >  1: someone else is also using syscall tracepoint e.g. ftrace
-static int tracepoint_reg_count = 0;
-static DEFINE_SPINLOCK(tracepoint_reg_lock);
-
-void ksu_clear_task_tracepoint_flag_if_needed(struct task_struct *t)
-{
-    unsigned long flags;
-    spin_lock_irqsave(&tracepoint_reg_lock, flags);
-    if (tracepoint_reg_count <= 1) {
-        ksu_clear_task_tracepoint_flag(t);
-    }
-    spin_unlock_irqrestore(&tracepoint_reg_lock, flags);
-}
-
-// Process marking management
-static void handle_process_mark(bool mark)
-{
+// 基础标记逻辑
+static void handle_process_mark(bool mark) {
     struct task_struct *p, *t;
     read_lock(&tasklist_lock);
-    for_each_process_thread (p, t) {
-        if (mark)
-            ksu_set_task_tracepoint_flag(t);
-        else
-            ksu_clear_task_tracepoint_flag(t);
+    for_each_process_thread(p, t) {
+        if (mark) ksu_set_task_tracepoint_flag(t);
+        else ksu_clear_task_tracepoint_flag(t);
     }
     read_unlock(&tasklist_lock);
 }
 
-void ksu_mark_all_process(void)
-{
-    handle_process_mark(true);
-    pr_info("hook_manager: mark all user process done!\n");
-}
-
-void ksu_unmark_all_process(void)
-{
-    handle_process_mark(false);
-    pr_info("hook_manager: unmark all user process done!\n");
-}
-
-static void ksu_mark_running_process_locked(void)
-{
-    struct task_struct *p, *t;
-    read_lock(&tasklist_lock);
-    for_each_process_thread (p, t) {
-        if (!t->mm) { // only user processes
-            continue;
-        }
-        int uid = task_uid(t).val;
-        const struct cred *cred = get_task_cred(t);
-        bool ksu_root_process = uid == 0 && is_task_ksu_domain(cred);
-        bool is_zygote_process = is_zygote(cred);
-        bool is_shell = uid == 2000;
-        // before boot completed, we shall mark init for marking zygote
-        bool is_init = t->pid == 1;
-        if (ksu_root_process || is_zygote_process || is_shell || is_init ||
-            ksu_is_allow_uid(uid)) {
-            ksu_set_task_tracepoint_flag(t);
-            pr_info("hook_manager: mark process: pid:%d, uid: %d, comm:%s\n",
-                    t->pid, uid, t->comm);
-        } else {
-            ksu_clear_task_tracepoint_flag(t);
-            pr_info("hook_manager: unmark process: pid:%d, uid: %d, comm:%s\n",
-                    t->pid, uid, t->comm);
-        }
-        put_cred(cred);
-    }
-    read_unlock(&tasklist_lock);
-}
-
-void ksu_mark_running_process(void)
-{
-    unsigned long flags;
-    spin_lock_irqsave(&tracepoint_reg_lock, flags);
-    if (tracepoint_reg_count <= 1) {
-        ksu_mark_running_process_locked();
-    } else {
-        pr_info(
-            "hook_manager: not mark running process since syscall tracepoint is in use\n");
-    }
-    spin_unlock_irqrestore(&tracepoint_reg_lock, flags);
-}
-
-// Get task mark status
-// Returns: 1 if marked, 0 if not marked, -ESRCH if task not found
-int ksu_get_task_mark(pid_t pid)
-{
-    struct task_struct *task;
-    int marked = -ESRCH;
-
-    rcu_read_lock();
-    task = find_task_by_vpid(pid);
-    if (task) {
-        get_task_struct(task);
-        rcu_read_unlock();
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 11, 0)
-        marked = test_task_syscall_work(task, SYSCALL_TRACEPOINT) ? 1 : 0;
-#else
-        marked = test_tsk_thread_flag(task, TIF_SYSCALL_TRACEPOINT) ? 1 : 0;
-#endif
-        put_task_struct(task);
-    } else {
-        rcu_read_unlock();
-    }
-
-    return marked;
-}
-
-// Set task mark status
-// Returns: 0 on success, -ESRCH if task not found
-int ksu_set_task_mark(pid_t pid, bool mark)
-{
-    struct task_struct *task;
-    int ret = -ESRCH;
-
-    rcu_read_lock();
-    task = find_task_by_vpid(pid);
-    if (task) {
-        get_task_struct(task);
-        rcu_read_unlock();
-        if (mark) {
-            ksu_set_task_tracepoint_flag(task);
-            pr_info("hook_manager: marked task pid=%d comm=%s\n", pid,
-                    task->comm);
-        } else {
-            ksu_clear_task_tracepoint_flag(task);
-            pr_info("hook_manager: unmarked task pid=%d comm=%s\n", pid,
-                    task->comm);
-        }
-        put_task_struct(task);
-        ret = 0;
-    } else {
-        rcu_read_unlock();
-    }
-
-    return ret;
-}
-
-#ifdef CONFIG_KRETPROBES
-
-static struct kretprobe *init_kretprobe(const char *name,
-                                        kretprobe_handler_t handler)
-{
-    struct kretprobe *rp = kzalloc(sizeof(struct kretprobe), GFP_KERNEL);
-    if (!rp)
-        return NULL;
-    rp->kp.symbol_name = name;
-    rp->handler = handler;
-    rp->data_size = 0;
-    rp->maxactive = 0;
-
-    int ret = register_kretprobe(rp);
-    pr_info("hook_manager: register_%s kretprobe: %d\n", name, ret);
-    if (ret) {
-        kfree(rp);
-        return NULL;
-    }
-
-    return rp;
-}
-
-static void destroy_kretprobe(struct kretprobe **rp_ptr)
-{
-    struct kretprobe *rp = *rp_ptr;
-    if (!rp)
-        return;
-    unregister_kretprobe(rp);
-    synchronize_rcu();
-    kfree(rp);
-    *rp_ptr = NULL;
-}
-
-static int syscall_regfunc_handler(struct kretprobe_instance *ri,
-                                   struct pt_regs *regs)
-{
-    unsigned long flags;
-    spin_lock_irqsave(&tracepoint_reg_lock, flags);
-    if (tracepoint_reg_count < 1) {
-        // while install our tracepoint, mark our processes
-        ksu_mark_running_process_locked();
-    } else if (tracepoint_reg_count == 1) {
-        // while other tracepoint first added, mark all processes
-        ksu_mark_all_process();
-    }
-    tracepoint_reg_count++;
-    spin_unlock_irqrestore(&tracepoint_reg_lock, flags);
-    return 0;
-}
-
-static int syscall_unregfunc_handler(struct kretprobe_instance *ri,
-                                     struct pt_regs *regs)
-{
-    unsigned long flags;
-    spin_lock_irqsave(&tracepoint_reg_lock, flags);
-    tracepoint_reg_count--;
-    if (tracepoint_reg_count <= 0) {
-        // while no tracepoint left, unmark all processes
-        ksu_unmark_all_process();
-    } else if (tracepoint_reg_count == 1) {
-        // while just our tracepoint left, unmark disallowed processes
-        ksu_mark_running_process_locked();
-    }
-    spin_unlock_irqrestore(&tracepoint_reg_lock, flags);
-    return 0;
-}
-
-static struct kretprobe *syscall_regfunc_rp = NULL;
-static struct kretprobe *syscall_unregfunc_rp = NULL;
-#endif
-
-static inline bool check_syscall_fastpath(int nr)
-{
+// 4.14 核心拦截列表
+static inline bool check_syscall_fastpath(int nr) {
     switch (nr) {
-    case __NR_newfstatat:
-    case __NR_faccessat:
-    case __NR_execve:
-    case __NR_setresuid:
-    case __NR_clone:
-        return true;
-    default:
-        return false;
+        case __NR_faccessat:
+        case __NR_execve:
+        case __NR_newfstatat:
+        case __NR_setresuid:
+            return true;
+        default:
+            return false;
     }
 }
 
-// Unmark init's child that are not zygote, adbd or ksud
-int ksu_handle_init_mark_tracker(const char __user **filename_user)
-{
+#ifdef CONFIG_HAVE_SYSCALL_TRACEPOINTS
+
+// 处理 init 进程执行 ksud 的特殊逻辑（原版精华）
+static void handle_init_exec(const char __user *filename) {
     char path[64];
-    unsigned long addr;
-    const char __user *fn;
-    long ret;
-
-    if (unlikely(!filename_user))
-        return 0;
-
-    addr = untagged_addr((unsigned long)*filename_user);
-    fn = (const char __user *)addr;
-
-    memset(path, 0, sizeof(path));
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,10,0)
-    ret = strncpy_from_user_nofault(path, fn, sizeof(path));
-#else
-    ret = strncpy_from_user(path, fn, sizeof(path));
-#endif
-
-    if (ret < 0) {
-        if (try_set_access_flag(addr)) {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,10,0)
-            ret = strncpy_from_user_nofault(path, fn, sizeof(path));
-#else
-            ret = strncpy_from_user(path, fn, sizeof(path));
-#endif
-            pr_info("ksu_handle_init_mark_tracker: retry ret=%ld\n", ret);
-        }
-    }
-
-    if (ret < 0) {
-        pr_warn("ksu_handle_init_mark_tracker: failed to copy path, ret=%ld\n", ret);
-        return ret;
-    }
-
-    if (unlikely(ret >= sizeof(path))) {
-        pr_warn("ksu_handle_init_mark_tracker: path too long, truncated\n");
-        path[sizeof(path) - 1] = '\0';
-    } else {
-        path[ret] = '\0';
-    }
-
-    if (unlikely(strcmp(path, KSUD_PATH) == 0)) {
-        pr_info("hook_manager: escape to root for init executing ksud: %d\n",
-                current->pid);
-        escape_to_root_for_init();
-    } else if (likely(strstr(path, "/app_process") == NULL &&
-                      strstr(path, "/adbd") == NULL)) {
-        pr_info("hook_manager: unmark %d exec %s\n", current->pid, path);
-        ksu_clear_task_tracepoint_flag_if_needed(current);
-    }
-
-    return 0;
-}
-
-// 唯一的 handler 定义（放在 #ifdef 内，避免重复和 scope 错误）
-#ifdef CONFIG_HAVE_SYSCALL_TRACEPOINTS
-
-static void ksu_sys_enter_handler(void *data, struct pt_regs *regs, long id)
-{
-    if (unlikely(check_syscall_fastpath(id))) {
-        if (ksu_su_compat_enabled) {
-            // Handle newfstatat
-            if (id == __NR_newfstatat) {
-                int dfd = (int)PT_REGS_PARM1(regs);
-                const char __user **filename_user = (const char __user **)&PT_REGS_PARM2(regs);
-                int flags = (int)PT_REGS_SYSCALL_PARM4(regs);
-                ksu_handle_stat(&dfd, filename_user, &flags);
-                return;
-            }
-
-            // Handle faccessat
-            if (id == __NR_faccessat) {
-                int dfd = (int)PT_REGS_PARM1(regs);
-                const char __user **filename_user = (const char __user **)&PT_REGS_PARM2(regs);
-                int mode = (int)PT_REGS_PARM3(regs);
-                ksu_handle_faccessat(&dfd, filename_user, &mode, NULL);
-                return;
-            }
-
-            // Handle execve
-            if (id == __NR_execve) {
-                const char __user **filename_user = (const char __user **)&PT_REGS_PARM1(regs);
-                if (current->pid != 1 && is_init(get_current_cred())) {
-                    ksu_handle_init_mark_tracker(filename_user);
-                } else {
-                    ksu_handle_execve_sucompat(filename_user, NULL, NULL, NULL);
-                }
-                return;
-            }
-
-            // setresuid hook
-            // ... 前面的 handler 代码不变 ...
-
-            // setresuid hook
-            if (id == __NR_setresuid) {
-                uid_t ruid = (uid_t)PT_REGS_PARM1(regs);
-                uid_t euid = (uid_t)PT_REGS_PARM2(regs);
-                uid_t suid = (uid_t)PT_REGS_PARM3(regs);
-                ksu_handle_setresuid(ruid, euid, suid);
-                return;
-            }
-
-#ifdef CONFIG_KSU_MANUAL_SU
-    if (id == __NR_clone) {
-        pr_debug("ksu: clone called, manual su alloc skipped on 4.14\n");
-        // ksu_handle_task_alloc(regs);  // 注释掉，避免 undefined
-        return;
-    }
-#endif
+    if (strncpy_from_user(path, filename, sizeof(path)) > 0) {
+        if (strcmp(path, KSUD_PATH) == 0) {
+            pr_info("ksu: escape to root for init: %d\n", current->pid);
+            escape_to_root_for_init();
         }
     }
 }
 
-#endif /* CONFIG_HAVE_SYSCALL_TRACEPOINTS */
+static void ksu_sys_enter_handler(void *data, struct pt_regs *regs, long id) {
+    if (!check_syscall_fastpath(id)) return;
 
-// 修改为 void 返回类型，与 header 一致
-void ksu_syscall_hook_manager_init(void)
-{
-    int ret = 0;
-    pr_info("hook_manager: ksu_hook_manager_init called\n");
-
-#ifdef CONFIG_KRETPROBES
-    syscall_regfunc_rp = init_kretprobe("syscall_regfunc", syscall_regfunc_handler);
-    syscall_unregfunc_rp = init_kretprobe("syscall_unregfunc", syscall_unregfunc_handler);
-#endif
-
-#ifdef CONFIG_HAVE_SYSCALL_TRACEPOINTS
-    ret = register_trace_sys_enter(ksu_sys_enter_handler, NULL);
-    if (ret) {
-        pr_err("ksu: failed to register sys_enter tracepoint: %d\n", ret);
-    } else {
-        pr_info("ksu: sys_enter tracepoint registered\n");
+    if (ksu_su_compat_enabled) {
+        // execve 拦截
+        if (id == __NR_execve) {
+            const char __user **fname_user = (const char __user **)&regs->regs[0];
+            // 如果是 init 进程在执行，检查是否是 ksud
+            if (current->pid == 1 || is_init(get_current_cred())) {
+                handle_init_exec(*fname_user);
+            } else {
+                ksu_handle_execve_sucompat(fname_user, NULL, NULL, NULL);
+            }
+            return;
+        }
+        // faccessat 拦截
+        if (id == __NR_faccessat) {
+            int dfd = (int)regs->regs[0];
+            const char __user **fname_user = (const char __user **)&regs->regs[1];
+            int mode = (int)regs->regs[2];
+            ksu_handle_faccessat(&dfd, fname_user, &mode, NULL);
+            return;
+        }
+        // newfstatat 拦截
+        if (id == __NR_newfstatat) {
+            int dfd = (int)regs->regs[0];
+            const char __user **fname_user = (const char __user **)&regs->regs[1];
+            int flags = (int)regs->regs[3];
+            ksu_handle_stat(&dfd, fname_user, &flags);
+            return;
+        }
+        // setresuid 拦截
+        if (id == __NR_setresuid) {
+            ksu_handle_setresuid((uid_t)regs->regs[0], (uid_t)regs->regs[1], (uid_t)regs->regs[2]);
+            return;
+        }
     }
-
-#ifndef CONFIG_KRETPROBES
-    ksu_mark_running_process_locked();
+}
 #endif
-#endif /* CONFIG_HAVE_SYSCALL_TRACEPOINTS */
 
+void ksu_syscall_hook_manager_init(void) {
+    pr_info("ksu: init hook manager (4.14 optimized)\n");
+#ifdef CONFIG_HAVE_SYSCALL_TRACEPOINTS
+    if (!register_trace_sys_enter(ksu_sys_enter_handler, NULL)) {
+        pr_info("ksu: sys_enter registered\n");
+        handle_process_mark(true);
+    }
+#endif
     ksu_setuid_hook_init();
     ksu_sucompat_init();
-
-    // 去掉 return 0; 因为现在是 void 函数
-    // 如果你想在失败时做处理，可以加 if (!ret) ... 但这里直接结束
 }
 
-// exit 函数不变
-void ksu_syscall_hook_manager_exit(void)
-{
-    pr_info("hook_manager: ksu_hook_manager_exit called\n");
-
+void ksu_syscall_hook_manager_exit(void) {
 #ifdef CONFIG_HAVE_SYSCALL_TRACEPOINTS
     unregister_trace_sys_enter(ksu_sys_enter_handler, NULL);
-    tracepoint_synchronize_unregister();
-    pr_info("hook_manager: sys_enter tracepoint unregistered\n");
 #endif
-
-#ifdef CONFIG_KRETPROBES
-    destroy_kretprobe(&syscall_regfunc_rp);
-    destroy_kretprobe(&syscall_unregfunc_rp);
-#endif
-
     ksu_sucompat_exit();
     ksu_setuid_hook_exit();
 }
