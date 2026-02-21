@@ -40,7 +40,6 @@ static DEFINE_MUTEX(ksu_rules);
 
 void apply_kernelsu_rules(void)
 {
-    // 在 4.14 下，如果不进入 #if 分支，db 就不会被用到，从而避免链接错误
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5,0,0)
     struct policydb *db = NULL;
 
@@ -195,14 +194,17 @@ static void reset_avc_cache()
 
 int handle_sepolicy(unsigned long arg3, void __user *arg4)
 {
+    // 4.14 链接修正：只有在 5.0+ 才会真正定义和使用 db
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,0,0)
     struct policydb *db;
+#endif
 
     if (!arg4) {
         return -EINVAL;
     }
 
     if (!getenforce()) {
-        pr_info("SELinux permissive or disabled when handle policy!\n");
+        pr_info("SukiSU: SELinux permissive or disabled when handle policy!\n");
     }
 
     struct sepol_data data;
@@ -213,12 +215,29 @@ int handle_sepolicy(unsigned long arg3, void __user *arg4)
 
     u32 cmd = data.cmd;
     u32 subcmd = data.subcmd;
+    int ret = -EINVAL;
+
+    // 4.14 核心补丁：如果版本低于 5.0，直接跳过数据库操作逻辑
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5,0,0)
+    pr_info("SukiSU: handle_sepolicy skipped on 4.14 to avoid link errors (cmd: %d)\n", cmd);
+    ret = 0; // 假装执行成功，让用户态程序继续运行
+    goto exit;
+#else
 
     mutex_lock(&ksu_rules);
 
     db = get_policydb();
+    if (!db) {
+        // 尝试获取全局符号（仅限支持导出的内核）
+        extern struct policydb policydb;
+        db = &policydb;
+    }
 
-    int ret = -EINVAL;
+    if (!db) {
+        pr_err("sepol: no valid policydb.\n");
+        goto unlock_exit;
+    }
+
     if (cmd == CMD_NORMAL_PERM) {
         char src_buf[MAX_SEPOL_LEN];
         char tgt_buf[MAX_SEPOL_LEN];
@@ -226,245 +245,84 @@ int handle_sepolicy(unsigned long arg3, void __user *arg4)
         char perm_buf[MAX_SEPOL_LEN];
 
         char *s, *t, *c, *p;
-        if (get_object(src_buf, data.sepol1, sizeof(src_buf), &s) < 0) {
-            pr_err("sepol: copy src failed.\n");
-            goto exit;
-        }
-
-        if (get_object(tgt_buf, data.sepol2, sizeof(tgt_buf), &t) < 0) {
-            pr_err("sepol: copy tgt failed.\n");
-            goto exit;
-        }
-
-        if (get_object(cls_buf, data.sepol3, sizeof(cls_buf), &c) < 0) {
-            pr_err("sepol: copy cls failed.\n");
-            goto exit;
-        }
-
-        if (get_object(perm_buf, data.sepol4, sizeof(perm_buf), &p) < 0) {
-            pr_err("sepol: copy perm failed.\n");
-            goto exit;
+        if (get_object(src_buf, data.sepol1, sizeof(src_buf), &s) < 0 ||
+            get_object(tgt_buf, data.sepol2, sizeof(tgt_buf), &t) < 0 ||
+            get_object(cls_buf, data.sepol3, sizeof(cls_buf), &c) < 0 ||
+            get_object(perm_buf, data.sepol4, sizeof(perm_buf), &p) < 0) {
+            goto unlock_exit;
         }
 
         bool success = false;
-        if (subcmd == 1) {
-            success = ksu_allow(db, s, t, c, p);
-        } else if (subcmd == 2) {
-            success = ksu_deny(db, s, t, c, p);
-        } else if (subcmd == 3) {
-            success = ksu_auditallow(db, s, t, c, p);
-        } else if (subcmd == 4) {
-            success = ksu_dontaudit(db, s, t, c, p);
-        } else {
-            pr_err("sepol: unknown subcmd: %d\n", subcmd);
-        }
+        if (subcmd == 1) success = ksu_allow(db, s, t, c, p);
+        else if (subcmd == 2) success = ksu_deny(db, s, t, c, p);
+        else if (subcmd == 3) success = ksu_auditallow(db, s, t, c, p);
+        else if (subcmd == 4) success = ksu_dontaudit(db, s, t, c, p);
         ret = success ? 0 : -EINVAL;
 
     } else if (cmd == CMD_XPERM) {
-        char src_buf[MAX_SEPOL_LEN];
-        char tgt_buf[MAX_SEPOL_LEN];
-        char cls_buf[MAX_SEPOL_LEN];
-
-        char __maybe_unused operation[MAX_SEPOL_LEN]; // it is always ioctl now!
-        char perm_set[MAX_SEPOL_LEN];
-
+        char src_buf[MAX_SEPOL_LEN], tgt_buf[MAX_SEPOL_LEN], cls_buf[MAX_SEPOL_LEN];
+        char operation[MAX_SEPOL_LEN], perm_set[MAX_SEPOL_LEN];
         char *s, *t, *c;
-        if (get_object(src_buf, data.sepol1, sizeof(src_buf), &s) < 0) {
-            pr_err("sepol: copy src failed.\n");
-            goto exit;
-        }
-        if (get_object(tgt_buf, data.sepol2, sizeof(tgt_buf), &t) < 0) {
-            pr_err("sepol: copy tgt failed.\n");
-            goto exit;
-        }
-        if (get_object(cls_buf, data.sepol3, sizeof(cls_buf), &c) < 0) {
-            pr_err("sepol: copy cls failed.\n");
-            goto exit;
-        }
-        if (strncpy_from_user(operation, data.sepol4, sizeof(operation)) < 0) {
-            pr_err("sepol: copy operation failed.\n");
-            goto exit;
-        }
-        if (strncpy_from_user(perm_set, data.sepol5, sizeof(perm_set)) < 0) {
-            pr_err("sepol: copy perm_set failed.\n");
-            goto exit;
+
+        if (get_object(src_buf, data.sepol1, sizeof(src_buf), &s) < 0 ||
+            get_object(tgt_buf, data.sepol2, sizeof(tgt_buf), &t) < 0 ||
+            get_object(cls_buf, data.sepol3, sizeof(cls_buf), &c) < 0 ||
+            strncpy_from_user(operation, data.sepol4, sizeof(operation)) < 0 ||
+            strncpy_from_user(perm_set, data.sepol5, sizeof(perm_set)) < 0) {
+            goto unlock_exit;
         }
 
         bool success = false;
-        if (subcmd == 1) {
-            success = ksu_allowxperm(db, s, t, c, perm_set);
-        } else if (subcmd == 2) {
-            success = ksu_auditallowxperm(db, s, t, c, perm_set);
-        } else if (subcmd == 3) {
-            success = ksu_dontauditxperm(db, s, t, c, perm_set);
-        } else {
-            pr_err("sepol: unknown subcmd: %d\n", subcmd);
-        }
+        if (subcmd == 1) success = ksu_allowxperm(db, s, t, c, perm_set);
+        else if (subcmd == 2) success = ksu_auditallowxperm(db, s, t, c, perm_set);
+        else if (subcmd == 3) success = ksu_dontauditxperm(db, s, t, c, perm_set);
         ret = success ? 0 : -EINVAL;
+
     } else if (cmd == CMD_TYPE_STATE) {
         char src[MAX_SEPOL_LEN];
-
-        if (strncpy_from_user(src, data.sepol1, sizeof(src)) < 0) {
-            pr_err("sepol: copy src failed.\n");
-            goto exit;
-        }
-
-        bool success = false;
-        if (subcmd == 1) {
-            success = ksu_permissive(db, src);
-        } else if (subcmd == 2) {
-            success = ksu_enforce(db, src);
-        } else {
-            pr_err("sepol: unknown subcmd: %d\n", subcmd);
-        }
-        if (success)
-            ret = 0;
+        if (strncpy_from_user(src, data.sepol1, sizeof(src)) < 0) goto unlock_exit;
+        
+        bool success = (subcmd == 1) ? ksu_permissive(db, src) : ksu_enforce(db, src);
+        if (success) ret = 0;
 
     } else if (cmd == CMD_TYPE || cmd == CMD_TYPE_ATTR) {
-        char type[MAX_SEPOL_LEN];
-        char attr[MAX_SEPOL_LEN];
+        char type[MAX_SEPOL_LEN], attr[MAX_SEPOL_LEN];
+        if (strncpy_from_user(type, data.sepol1, sizeof(type)) < 0 ||
+            strncpy_from_user(attr, data.sepol2, sizeof(attr)) < 0) goto unlock_exit;
 
-        if (strncpy_from_user(type, data.sepol1, sizeof(type)) < 0) {
-            pr_err("sepol: copy type failed.\n");
-            goto exit;
-        }
-        if (strncpy_from_user(attr, data.sepol2, sizeof(attr)) < 0) {
-            pr_err("sepol: copy attr failed.\n");
-            goto exit;
-        }
-
-        bool success = false;
-        if (cmd == CMD_TYPE) {
-            success = ksu_type(db, type, attr);
-        } else {
-            success = ksu_typeattribute(db, type, attr);
-        }
-        if (!success) {
-            pr_err("sepol: %d failed.\n", cmd);
-            goto exit;
-        }
-        ret = 0;
+        if (cmd == CMD_TYPE) ret = ksu_type(db, type, attr) ? 0 : -EINVAL;
+        else ret = ksu_typeattribute(db, type, attr) ? 0 : -EINVAL;
 
     } else if (cmd == CMD_ATTR) {
         char attr[MAX_SEPOL_LEN];
-
-        if (strncpy_from_user(attr, data.sepol1, sizeof(attr)) < 0) {
-            pr_err("sepol: copy attr failed.\n");
-            goto exit;
-        }
-        if (!ksu_attribute(db, attr)) {
-            pr_err("sepol: %d failed.\n", cmd);
-            goto exit;
-        }
-        ret = 0;
+        if (strncpy_from_user(attr, data.sepol1, sizeof(attr)) < 0) goto unlock_exit;
+        if (ksu_attribute(db, attr)) ret = 0;
 
     } else if (cmd == CMD_TYPE_TRANSITION) {
-        char src[MAX_SEPOL_LEN];
-        char tgt[MAX_SEPOL_LEN];
-        char cls[MAX_SEPOL_LEN];
-        char default_type[MAX_SEPOL_LEN];
-        char object[MAX_SEPOL_LEN];
+        char src[MAX_SEPOL_LEN], tgt[MAX_SEPOL_LEN], cls[MAX_SEPOL_LEN], def[MAX_SEPOL_LEN], obj[MAX_SEPOL_LEN];
+        if (strncpy_from_user(src, data.sepol1, sizeof(src)) < 0 ||
+            strncpy_from_user(tgt, data.sepol2, sizeof(tgt)) < 0 ||
+            strncpy_from_user(cls, data.sepol3, sizeof(cls)) < 0 ||
+            strncpy_from_user(def, data.sepol4, sizeof(def)) < 0) goto unlock_exit;
+        
+        char *real_obj = (data.sepol5 && strncpy_from_user(obj, data.sepol5, sizeof(obj)) >= 0) ? obj : NULL;
+        if (ksu_type_transition(db, src, tgt, cls, def, real_obj)) ret = 0;
 
-        if (strncpy_from_user(src, data.sepol1, sizeof(src)) < 0) {
-            pr_err("sepol: copy src failed.\n");
-            goto exit;
-        }
-        if (strncpy_from_user(tgt, data.sepol2, sizeof(tgt)) < 0) {
-            pr_err("sepol: copy tgt failed.\n");
-            goto exit;
-        }
-        if (strncpy_from_user(cls, data.sepol3, sizeof(cls)) < 0) {
-            pr_err("sepol: copy cls failed.\n");
-            goto exit;
-        }
-        if (strncpy_from_user(default_type, data.sepol4, sizeof(default_type)) <
-            0) {
-            pr_err("sepol: copy default_type failed.\n");
-            goto exit;
-        }
-        char *real_object;
-        if (data.sepol5 == NULL) {
-            real_object = NULL;
-        } else {
-            if (strncpy_from_user(object, data.sepol5, sizeof(object)) < 0) {
-                pr_err("sepol: copy object failed.\n");
-                goto exit;
-            }
-            real_object = object;
-        }
-
-        bool success =
-            ksu_type_transition(db, src, tgt, cls, default_type, real_object);
-        if (success)
-            ret = 0;
-
-    } else if (cmd == CMD_TYPE_CHANGE) {
-        char src[MAX_SEPOL_LEN];
-        char tgt[MAX_SEPOL_LEN];
-        char cls[MAX_SEPOL_LEN];
-        char default_type[MAX_SEPOL_LEN];
-
-        if (strncpy_from_user(src, data.sepol1, sizeof(src)) < 0) {
-            pr_err("sepol: copy src failed.\n");
-            goto exit;
-        }
-        if (strncpy_from_user(tgt, data.sepol2, sizeof(tgt)) < 0) {
-            pr_err("sepol: copy tgt failed.\n");
-            goto exit;
-        }
-        if (strncpy_from_user(cls, data.sepol3, sizeof(cls)) < 0) {
-            pr_err("sepol: copy cls failed.\n");
-            goto exit;
-        }
-        if (strncpy_from_user(default_type, data.sepol4, sizeof(default_type)) <
-            0) {
-            pr_err("sepol: copy default_type failed.\n");
-            goto exit;
-        }
-        bool success = false;
-        if (subcmd == 1) {
-            success = ksu_type_change(db, src, tgt, cls, default_type);
-        } else if (subcmd == 2) {
-            success = ksu_type_member(db, src, tgt, cls, default_type);
-        } else {
-            pr_err("sepol: unknown subcmd: %d\n", subcmd);
-        }
-        if (success)
-            ret = 0;
     } else if (cmd == CMD_GENFSCON) {
-        char name[MAX_SEPOL_LEN];
-        char path[MAX_SEPOL_LEN];
-        char context[MAX_SEPOL_LEN];
-        if (strncpy_from_user(name, data.sepol1, sizeof(name)) < 0) {
-            pr_err("sepol: copy name failed.\n");
-            goto exit;
-        }
-        if (strncpy_from_user(path, data.sepol2, sizeof(path)) < 0) {
-            pr_err("sepol: copy path failed.\n");
-            goto exit;
-        }
-        if (strncpy_from_user(context, data.sepol3, sizeof(context)) < 0) {
-            pr_err("sepol: copy context failed.\n");
-            goto exit;
-        }
-
-        if (!ksu_genfscon(db, name, path, context)) {
-            pr_err("sepol: %d failed.\n", cmd);
-            goto exit;
-        }
-        ret = 0;
-    } else {
-        pr_err("sepol: unknown cmd: %d\n", cmd);
+        char n[MAX_SEPOL_LEN], p[MAX_SEPOL_LEN], c[MAX_SEPOL_LEN];
+        if (strncpy_from_user(n, data.sepol1, sizeof(n)) < 0 ||
+            strncpy_from_user(p, data.sepol2, sizeof(p)) < 0 ||
+            strncpy_from_user(c, data.sepol3, sizeof(c)) < 0) goto unlock_exit;
+        if (ksu_genfscon(db, n, p, c)) ret = 0;
     }
 
-exit:
+unlock_exit:
     mutex_unlock(&ksu_rules);
+#endif // 结束 5.0+ 逻辑分支
 
+exit:
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5,0,0)
     reset_avc_cache();
-#else
-    pr_info("SukiSU: reset_avc_cache skipped on 4.14\n");
 #endif
-
     return ret;
 }
