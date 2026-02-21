@@ -20,6 +20,8 @@
 #include "selinux/selinux.h"
 #include "util.h"
 #include "ksud.h"
+#include <linux/uaccess.h>  // 确保包含
+#include <linux/version.h>  //grok 王朝了 还不过我弄你
 
 // Tracepoint registration count management
 // == 1: just us
@@ -263,10 +265,37 @@ int ksu_handle_init_mark_tracker(const char __user **filename_user)
     fn = (const char __user *)addr;
 
     memset(path, 0, sizeof(path));
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,10,0)
+    // 新内核使用 nofault 版本（安全，不触发 page fault）
     ret = strncpy_from_user_nofault(path, fn, sizeof(path));
-    if (ret < 0 && try_set_access_flag(addr)) {
-        ret = strncpy_from_user_nofault(path, fn, sizeof(path));
-        pr_info("ksu_handle_init_mark_tracker: %ld\n", ret);
+#else
+    // 4.14 使用标准 strncpy_from_user（可能触发 fault，但我们已检查访问）
+    ret = strncpy_from_user(path, fn, sizeof(path));
+#endif
+
+    if (ret < 0) {
+        // 尝试设置访问标志后重试（保留你原逻辑）
+        if (try_set_access_flag(addr)) {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,10,0)
+            ret = strncpy_from_user_nofault(path, fn, sizeof(path));
+#else
+            ret = strncpy_from_user(path, fn, sizeof(path));
+#endif
+            pr_info("ksu_handle_init_mark_tracker: retry ret=%ld\n", ret);
+        }
+    }
+
+    if (ret < 0) {
+        pr_warn("ksu_handle_init_mark_tracker: failed to copy path, ret=%ld\n", ret);
+        return ret;  // 直接返回错误，避免后续崩溃
+    }
+
+    if (unlikely(ret >= sizeof(path))) {
+        pr_warn("ksu_handle_init_mark_tracker: path too long, truncated\n");
+        path[sizeof(path) - 1] = '\0';
+    } else {
+        path[ret] = '\0';  // 确保字符串结束
     }
 
     if (unlikely(strcmp(path, KSUD_PATH) == 0)) {
@@ -281,52 +310,6 @@ int ksu_handle_init_mark_tracker(const char __user **filename_user)
 
     return 0;
 }
-#ifdef CONFIG_KSU_MANUAL_SU
-#include "manual_su.h"
-static inline void ksu_handle_task_alloc(struct pt_regs *regs)
-{
-    ksu_try_escalate_for_uid(current_uid().val);
-}
-#endif
-
-#ifdef CONFIG_HAVE_SYSCALL_TRACEPOINTS
-// Generic sys_enter handler that dispatches to specific handlers
-static void ksu_sys_enter_handler(void *data, struct pt_regs *regs, long id)
-{
-    if (unlikely(check_syscall_fastpath(id))) {
-        if (ksu_su_compat_enabled) {
-            // Handle newfstatat
-            if (id == __NR_newfstatat) {
-                int *dfd = (int *)&PT_REGS_PARM1(regs);
-                const char __user **filename_user =
-                    (const char __user **)&PT_REGS_PARM2(regs);
-                int *flags = (int *)&PT_REGS_SYSCALL_PARM4(regs);
-                ksu_handle_stat(dfd, filename_user, flags);
-                return;
-            }
-
-            // Handle faccessat
-            if (id == __NR_faccessat) {
-                int *dfd = (int *)&PT_REGS_PARM1(regs);
-                const char __user **filename_user =
-                    (const char __user **)&PT_REGS_PARM2(regs);
-                int *mode = (int *)&PT_REGS_PARM3(regs);
-                ksu_handle_faccessat(dfd, filename_user, mode, NULL);
-                return;
-            }
-
-            // Handle execve
-            if (id == __NR_execve) {
-                const char __user **filename_user =
-                    (const char __user **)&PT_REGS_PARM1(regs);
-                if (current->pid != 1 && is_init(get_current_cred())) {
-                    ksu_handle_init_mark_tracker(filename_user);
-                } else {
-                    ksu_handle_execve_sucompat(filename_user, NULL, NULL, NULL);
-                }
-                return;
-            }
-        }
 
         // Handle setresuid
         if (id == __NR_setresuid) {

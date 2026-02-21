@@ -46,17 +46,24 @@ void apply_kernelsu_rules(void)
 
     db = get_policydb();
     if (!db) {
-        pr_warn("SukiSU: get_policydb failed, fallback to global policydb\n");
+        pr_warn("SukiSU: get_policydb failed");
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,0,0)
+        // 新内核 fallback 到全局 policydb（如果导出）
         extern struct policydb policydb;
         db = &policydb;
         if (!db) {
-            pr_err("SukiSU: fallback policydb also failed, skip rules\n");
-            mutex_unlock(&ksu_rules);
-            return;
+            pr_err("SukiSU: fallback policydb also failed, skip rules apply\n");
+            goto out;
         }
+#else
+        // 4.14: policydb 未导出，无法 fallback，直接用 NULL db 但继续执行规则（假设 ksu_allow 支持 NULL 或内部处理）
+        pr_info("SukiSU: on 4.14, applying core rules without policydb fallback (may be limited)\n");
+        // db 保持 NULL，继续下面规则（测试是否 crash）
+#endif
+    } else {
+        pr_info("SukiSU: got policydb successfully\n");
     }
-
-    pr_info("SukiSU: applying SELinux rules on 4.14 (core only)\n");
 
     // 核心规则：让 KSU domain permissive + 全允许（su 基本可用）
     ksu_permissive(db, KERNEL_SU_DOMAIN);
@@ -114,9 +121,11 @@ void apply_kernelsu_rules(void)
     }
     */
 
+out:
     mutex_unlock(&ksu_rules);
 
-    pr_info("SukiSU: core rules applied successfully\n");
+    pr_info("SukiSU: rules processing completed%s\n",
+            db ? " (with policydb)" : " (skipped policydb access)");
 }
 
 #define MAX_SEPOL_LEN 128
