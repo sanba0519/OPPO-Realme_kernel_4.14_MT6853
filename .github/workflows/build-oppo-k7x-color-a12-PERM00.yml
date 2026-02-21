@@ -78,7 +78,19 @@ jobs:
             sed -i 's/TWA_SIGNAL/true/g' drivers/kernelsu/allowlist.c
           fi
           
-          echo "SukiSU-Ultra 已确认集成，使用仓库中版本（filter_count 应已手动禁用）"
+          # 新增：强制修复 selinux/selinux.c 中的 const 问题（Clang 不允许修改 const 指针）
+          if [ -f "drivers/kernelsu/selinux/selinux.c" ]; then
+            echo "检测到 selinux/selinux.c，正在移除 const 以兼容 Clang + 4.14"
+            sed -i 's/const struct task_security_struct \*tsec/struct task_security_struct *tsec/g' drivers/kernelsu/selinux/selinux.c
+            sed -i 's/const struct task_security_struct \*tsec = /struct task_security_struct *tsec = /g' drivers/kernelsu/selinux/selinux.c
+            sed -i 's/const struct task_security_struct \*/struct task_security_struct */g' drivers/kernelsu/selinux/selinux.c
+            echo "已移除 const，显示修改附近代码（调试）："
+            grep -C 5 "task_security_struct" drivers/kernelsu/selinux/selinux.c || echo "无匹配行"
+          else
+            echo "未找到 selinux/selinux.c，无需 const 修复（可能是最新版结构）"
+          fi
+          
+          echo "SukiSU-Ultra 已确认集成，使用仓库中版本 + const 修复（filter_count 应已手动禁用）"
           
       - name: 修复 Kconfig 非法字符与换行符
         run: |
