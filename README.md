@@ -10,10 +10,26 @@
 
 处理器:天玑720/天玑800u(尚未测试） 代号mtk6853
 
+***
+
+如何构建？
+
+1.fork本项目
+
+2.点击Action 运行工作流程
+
+Build OppoK7x (PERM00) (Color A12)（MT6853）是集成了SukiSU　~~但是不能用 只能开机~~
+
+编译OPPO/Realme-安卓12-通用mt6853机型内核 支持ksu docker lxc kvm Kali-Nethunter是可以正常使用的 你需要下载[V0.95](https://github.com/tiann/KernelSU/releases/tag/v0.9.5)的KernelSU 来使用
+
+3.等待构建完成 在TWRP刷入食用
+
+~~enjoy it!~~
+
 ###
 尚未开发完全 敬请期待
 
-你可以通过关注[TG频道](https://t.me/oppok7x)来关注开发者动态
+~你可以通过关注[TG频道](https://t.me/oppok7x)来关注开发者动态~
 ***
 2026.02.21 
 
