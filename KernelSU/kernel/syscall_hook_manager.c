@@ -29,7 +29,7 @@ static void handle_process_mark(bool mark) {
     read_unlock(&tasklist_lock);
 }
 
-// 补全链接器需要的符号 (Undefined Symbols 修复)
+// 补全链接器需要的符号
 void ksu_mark_all_process(void) { handle_process_mark(true); }
 void ksu_unmark_all_process(void) { handle_process_mark(false); }
 void ksu_mark_running_process(void) { handle_process_mark(true); }
@@ -78,9 +78,9 @@ static inline bool check_syscall_fastpath(int nr) {
 }
 
 #ifdef CONFIG_HAVE_SYSCALL_TRACEPOINTS
-static void handle_init_exec(const char __user *filename) {
+static void handle_init_exec(const char __user *fname) {
     char path[64];
-    if (strncpy_from_user(path, filename, sizeof(path)) > 0) {
+    if (strncpy_from_user(path, fname, sizeof(path)) > 0) {
         if (strcmp(path, KSUD_PATH) == 0) {
             escape_to_root_for_init();
         }
@@ -90,6 +90,7 @@ static void handle_init_exec(const char __user *filename) {
 static void ksu_sys_enter_handler(void *data, struct pt_regs *regs, long id) {
     if (!check_syscall_fastpath(id)) return;
     if (ksu_su_compat_enabled) {
+        // execve
         if (id == __NR_execve) {
             const char __user **fname_user = (const char __user **)&regs->regs[0];
             if (current->pid == 1 || is_init(get_current_cred())) {
@@ -99,20 +100,23 @@ static void ksu_sys_enter_handler(void *data, struct pt_regs *regs, long id) {
             }
             return;
         }
+        // faccessat
         if (id == __NR_faccessat) {
             int dfd = (int)regs->regs[0];
             const char __user **fname_user = (const char __user **)&regs->regs[1];
             int mode = (int)regs->regs[2];
-            ksu_handle_faccessat(&dfd, filename_user, &mode, NULL);
+            ksu_handle_faccessat(&dfd, fname_user, &mode, NULL);
             return;
         }
+        // newfstatat
         if (id == __NR_newfstatat) {
             int dfd = (int)regs->regs[0];
             const char __user **fname_user = (const char __user **)&regs->regs[1];
             int flags = (int)regs->regs[3];
-            ksu_handle_stat(&dfd, filename_user, &flags);
+            ksu_handle_stat(&dfd, fname_user, &flags);
             return;
         }
+        // setresuid
         if (id == __NR_setresuid) {
             ksu_handle_setresuid((uid_t)regs->regs[0], (uid_t)regs->regs[1], (uid_t)regs->regs[2]);
             return;
