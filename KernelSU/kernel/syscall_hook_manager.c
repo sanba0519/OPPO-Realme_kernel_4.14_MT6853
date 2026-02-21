@@ -344,25 +344,86 @@ void ksu_syscall_hook_manager_init(void)
 #endif
 
 #ifdef CONFIG_HAVE_SYSCALL_TRACEPOINTS
+
+// 先声明 handler 函数（避免 undeclared）
+static void ksu_sys_enter_handler(void *data, struct pt_regs *regs, long id);
+
+// 如果 handler 函数定义在别处，确保这里声明；或把定义移到这里
+static void ksu_sys_enter_handler(void *data, struct pt_regs *regs, long id)
+{
+    // 这里放你原来的 handler 实现（从之前片段复制）
+    if (unlikely(check_syscall_fastpath(id))) {
+        if (ksu_su_compat_enabled) {
+            // Handle newfstatat
+            if (id == __NR_newfstatat) {
+                int *dfd = (int *)&PT_REGS_PARM1(regs);
+                const char __user **filename_user = (const char __user **)&PT_REGS_PARM2(regs);
+                int *flags = (int *)&PT_REGS_SYSCALL_PARM4(regs);
+                ksu_handle_stat(dfd, filename_user, flags);
+                return;
+            }
+
+            // Handle faccessat
+            if (id == __NR_faccessat) {
+                int *dfd = (int *)&PT_REGS_PARM1(regs);
+                const char __user **filename_user = (const char __user **)&PT_REGS_PARM2(regs);
+                int *mode = (int *)&PT_REGS_PARM3(regs);
+                ksu_handle_faccessat(dfd, filename_user, mode, NULL);
+                return;
+            }
+
+            // Handle execve
+            if (id == __NR_execve) {
+                const char __user **filename_user = (const char __user **)&PT_REGS_PARM1(regs);
+                if (current->pid != 1 && is_init(get_current_cred())) {
+                    ksu_handle_init_mark_tracker(filename_user);
+                } else {
+                    ksu_handle_execve_sucompat(filename_user, NULL, NULL, NULL);
+                }
+                return;
+            }
+
+            // 可选：setresuid / clone hook（如果你加了）
+            if (id == __NR_setresuid) {
+                pr_debug("ksu: setresuid called\n");
+            }
+            if (id == __NR_clone) {
+                pr_debug("ksu: clone called\n");
+            }
+        }
+    }
+}
+
+#endif  // CONFIG_HAVE_SYSCALL_TRACEPOINTS
+
+int ksu_syscall_hook_manager_init(void)
+{
+    int ret = 0;
+
+#ifdef CONFIG_HAVE_SYSCALL_TRACEPOINTS
     ret = register_trace_sys_enter(ksu_sys_enter_handler, NULL);
-#ifndef CONFIG_KRETPROBES
-    ksu_mark_running_process_locked();
-#endif
     if (ret) {
-        pr_err("hook_manager: failed to register sys_enter tracepoint: %d\n",
-               ret);
+        pr_err("hook_manager: failed to register sys_enter tracepoint: %d\n", ret);
+        // 可选：return ret; 如果失败就退出 init
     } else {
         pr_info("hook_manager: sys_enter tracepoint registered\n");
     }
+
+#ifndef CONFIG_KRETPROBES
+    ksu_mark_running_process_locked();
 #endif
+#endif  // CONFIG_HAVE_SYSCALL_TRACEPOINTS
 
     ksu_setuid_hook_init();
     ksu_sucompat_init();
+
+    return ret;  // 如果 tracepoint 失败，返回错误（可选改成 0 继续）
 }
 
 void ksu_syscall_hook_manager_exit(void)
 {
     pr_info("hook_manager: ksu_hook_manager_exit called\n");
+
 #ifdef CONFIG_HAVE_SYSCALL_TRACEPOINTS
     unregister_trace_sys_enter(ksu_sys_enter_handler, NULL);
     tracepoint_synchronize_unregister();
