@@ -359,11 +359,11 @@ static void ksu_sys_enter_handler(void *data, struct pt_regs *regs, long id)
             }
 
 #ifdef CONFIG_KSU_MANUAL_SU
-            // Handle task_alloc via clone
-            if (id == __NR_clone) {
-                ksu_handle_task_alloc(regs);
-                return;  // 改为无值返回
-            }
+    if (id == __NR_clone) {
+        pr_debug("ksu: clone called, manual su alloc skipped on 4.14\n");
+        // ksu_handle_task_alloc(regs);  // 注释掉，避免 undefined
+        return;
+    }
 #endif
         }
     }

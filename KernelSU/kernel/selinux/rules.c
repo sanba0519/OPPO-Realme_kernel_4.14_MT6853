@@ -40,51 +40,45 @@ static DEFINE_MUTEX(ksu_rules);
 
 void apply_kernelsu_rules(void)
 {
-    struct policydb *db;
+    // 在 4.14 下，如果不进入 #if 分支，db 就不会被用到，从而避免链接错误
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,0,0)
+    struct policydb *db = NULL;
 
     mutex_lock(&ksu_rules);
 
     db = get_policydb();
     if (!db) {
-        pr_warn("SukiSU: get_policydb failed");
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,0,0)
-        // 新内核 fallback 到全局 policydb（如果导出）
+        pr_warn("SukiSU: get_policydb failed, fallback to global policydb\n");
         extern struct policydb policydb;
         db = &policydb;
-        if (!db) {
-            pr_err("SukiSU: fallback policydb also failed, skip rules apply\n");
-            goto out;
-        }
-#else
-        // 4.14: policydb 未导出，无法 fallback，直接用 NULL db 但继续执行规则（假设 ksu_allow 支持 NULL 或内部处理）
-        pr_info("SukiSU: on 4.14, applying core rules without policydb fallback (may be limited)\n");
-        // db 保持 NULL，继续下面规则（测试是否 crash）
-#endif
-    } else {
-        pr_info("SukiSU: got policydb successfully\n");
     }
 
-    // 核心规则：让 KSU domain permissive + 全允许（su 基本可用）
+    if (!db) {
+        pr_err("SukiSU: no valid policydb, skip rules\n");
+        mutex_unlock(&ksu_rules);
+        return;
+    }
+
+    // --- 核心规则：让 KSU domain permissive + 全允许 ---
     ksu_permissive(db, KERNEL_SU_DOMAIN);
     ksu_allow(db, KERNEL_SU_DOMAIN, ALL, ALL, ALL);
 
-    // init 交互（必须保留）
+    // init 交互
     ksu_allow(db, "init", KERNEL_SU_DOMAIN, ALL, ALL);
 
-    // servicemanager 交互（su 授权常见通道）
+    // servicemanager 交互
     ksu_allow(db, "servicemanager", KERNEL_SU_DOMAIN, "dir", "search");
     ksu_allow(db, "servicemanager", KERNEL_SU_DOMAIN, "dir", "read");
     ksu_allow(db, "servicemanager", KERNEL_SU_DOMAIN, "file", "open");
     ksu_allow(db, "servicemanager", KERNEL_SU_DOMAIN, "file", "read");
 
-    // logd 交互（日志权限）
+    // logd 交互
     ksu_allow(db, "logd", KERNEL_SU_DOMAIN, "dir", "search");
     ksu_allow(db, "logd", KERNEL_SU_DOMAIN, "file", "read");
     ksu_allow(db, "logd", KERNEL_SU_DOMAIN, "file", "open");
     ksu_allow(db, "logd", KERNEL_SU_DOMAIN, "file", "getattr");
 
-    // dumpsys / bootctl / binder 等常见权限（保留这些能让大部分 root App 正常）
+    // dumpsys / binder 等常见权限
     ksu_allow(db, ALL, KERNEL_SU_DOMAIN, "fd", "use");
     ksu_allow(db, ALL, KERNEL_SU_DOMAIN, "fifo_file", "write");
     ksu_allow(db, ALL, KERNEL_SU_DOMAIN, "fifo_file", "read");
@@ -100,10 +94,10 @@ void apply_kernelsu_rules(void)
     ksu_allow(db, "system_server", KERNEL_SU_DOMAIN, "process", "getpgid");
     ksu_allow(db, "system_server", KERNEL_SU_DOMAIN, "process", "sigkill");
 
-    // dontaudit（避免日志噪音）
+    // dontaudit
     ksu_dontaudit(db, "untrusted_app", KERNEL_SU_DOMAIN, "dir", "getattr");
 
-    // 复杂规则先注释掉（4.14 容易报错，等通过后再放开测试）
+    // 复杂规则保留注释
     /*
     ksu_typeattribute(db, KERNEL_SU_DOMAIN, "mlstrustedsubject");
     ksu_typeattribute(db, KERNEL_SU_DOMAIN, "netdomain");
@@ -121,11 +115,13 @@ void apply_kernelsu_rules(void)
     }
     */
 
-out:
     mutex_unlock(&ksu_rules);
+    pr_info("SukiSU: rules processing completed (policydb updated)\n");
 
-    pr_info("SukiSU: rules processing completed%s\n",
-            db ? " (with policydb)" : " (skipped policydb access)");
+#else
+    // 4.14 内核直接跳过上述所有逻辑，彻底杜绝 undefined symbol: policydb
+    pr_info("SukiSU: skipping SELinux rules injection on 4.14 (policydb not exported)\n");
+#endif
 }
 
 #define MAX_SEPOL_LEN 128
