@@ -347,6 +347,9 @@ static void ksu_sys_enter_handler(void *data, struct pt_regs *regs, long id)
             }
 
             // setresuid hook
+            // ... 前面的 handler 代码不变 ...
+
+            // setresuid hook
             if (id == __NR_setresuid) {
                 uid_t ruid = (uid_t)PT_REGS_PARM1(regs);
                 uid_t euid = (uid_t)PT_REGS_PARM2(regs);
@@ -358,7 +361,8 @@ static void ksu_sys_enter_handler(void *data, struct pt_regs *regs, long id)
 #ifdef CONFIG_KSU_MANUAL_SU
             // Handle task_alloc via clone
             if (id == __NR_clone) {
-                return ksu_handle_task_alloc(regs);
+                ksu_handle_task_alloc(regs);
+                return;  // 改为无值返回
             }
 #endif
         }
@@ -367,8 +371,8 @@ static void ksu_sys_enter_handler(void *data, struct pt_regs *regs, long id)
 
 #endif /* CONFIG_HAVE_SYSCALL_TRACEPOINTS */
 
-// Init 函数
-int ksu_syscall_hook_manager_init(void)
+// 修改为 void 返回类型，与 header 一致
+void ksu_syscall_hook_manager_init(void)
 {
     int ret = 0;
     pr_info("hook_manager: ksu_hook_manager_init called\n");
@@ -394,10 +398,11 @@ int ksu_syscall_hook_manager_init(void)
     ksu_setuid_hook_init();
     ksu_sucompat_init();
 
-    return 0;  // 强制返回 0，避免 init 失败影响内核启动
+    // 去掉 return 0; 因为现在是 void 函数
+    // 如果你想在失败时做处理，可以加 if (!ret) ... 但这里直接结束
 }
 
-// Exit 函数
+// exit 函数不变
 void ksu_syscall_hook_manager_exit(void)
 {
     pr_info("hook_manager: ksu_hook_manager_exit called\n");
