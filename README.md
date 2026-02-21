@@ -22,7 +22,9 @@ Build OppoK7x (PERM00) (Color A12)（MT6853）是集成了SukiSU　~~但是不�
 
 编译OPPO/Realme-安卓12-通用mt6853机型内核 支持ksu docker lxc kvm Kali-Nethunter是可以正常使用的 你需要下载[V0.95](https://github.com/tiann/KernelSU/releases/tag/v0.9.5)的KernelSU 来使用
 
-3.等待构建完成 在TWRP刷入食用
+3.等待构建完成 打开编译好的AK3 并解压进去 打开anykernel.sh 搜索BLOCK=字段 找到那一行并改成`BLOCK=/dev/block/by-name/boot;`
+
+4. 在TWRP刷入食用
 
 ~~enjoy it!~~
 
