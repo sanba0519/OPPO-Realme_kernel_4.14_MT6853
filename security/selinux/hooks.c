@@ -108,14 +108,15 @@ static int selinux_enforcing_boot;
 
 static int __init enforcing_setup(char *str)
 {
-	unsigned long enforcing;
-	if (!kstrtoul(str, 0, &enforcing))
-		selinux_enforcing_boot = enforcing ? 1 : 0;
-	return 1;
+    unsigned long enforcing;
+    if (!kstrtoul(str, 0, &enforcing))
+        selinux_enforcing_boot = enforcing ? 1 : 0;
+    return 1;
 }
 __setup("enforcing=", enforcing_setup);
 #else
-#define selinux_enforcing_boot 1
+// 【关键修改】把 1 改成 0，让不支持 DEVELOP 模式的内核也默认进入宽容模式
+#define selinux_enforcing_boot 0 
 #endif
 
 #ifdef CONFIG_SECURITY_SELINUX_BOOTPARAM
