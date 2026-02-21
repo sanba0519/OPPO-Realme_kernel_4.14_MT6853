@@ -14,3 +14,10 @@
 尚未开发完全 敬请期待
 
 你可以通过关注[TG频道](https://t.me/oppok7x)来关注开发者动态
+***
+2026.02.21 
+实在不知道为啥 刷入后sukisu不显示运行中 原作者已弃坑 接下来交给[@Eridian1628](https://github.com/Eridian1628)接手 
+
+`后会有期`
+
+  by @sanba0519
