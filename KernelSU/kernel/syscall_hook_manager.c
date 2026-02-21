@@ -8,6 +8,7 @@
 #include <trace/events/syscalls.h>
 #include <linux/version.h>
 #include <asm/unistd.h>
+#include <linux/sched.h>
 
 #include "allowlist.h"
 #include "arch.h"
@@ -17,7 +18,7 @@
 #include "util.h"
 #include "ksud.h"
 
-// 基础标记逻辑
+// --- 基础进程标记逻辑 ---
 static void handle_process_mark(bool mark) {
     struct task_struct *p, *t;
     read_lock(&tasklist_lock);
@@ -28,7 +29,42 @@ static void handle_process_mark(bool mark) {
     read_unlock(&tasklist_lock);
 }
 
-// 4.14 核心拦截列表
+// 补全链接器需要的符号 (Undefined Symbols 修复)
+void ksu_mark_all_process(void) { handle_process_mark(true); }
+void ksu_unmark_all_process(void) { handle_process_mark(false); }
+void ksu_mark_running_process(void) { handle_process_mark(true); }
+
+void ksu_clear_task_tracepoint_flag_if_needed(struct task_struct *t) {
+    ksu_clear_task_tracepoint_flag(t);
+}
+
+int ksu_get_task_mark(pid_t pid) {
+    struct task_struct *task;
+    int marked = -ESRCH;
+    rcu_read_lock();
+    task = find_task_by_vpid(pid);
+    if (task) {
+        marked = test_tsk_thread_flag(task, TIF_SYSCALL_TRACEPOINT) ? 1 : 0;
+    }
+    rcu_read_unlock();
+    return marked;
+}
+
+int ksu_set_task_mark(pid_t pid, bool mark) {
+    struct task_struct *task;
+    int ret = -ESRCH;
+    rcu_read_lock();
+    task = find_task_by_vpid(pid);
+    if (task) {
+        if (mark) ksu_set_task_tracepoint_flag(task);
+        else ksu_clear_task_tracepoint_flag(task);
+        ret = 0;
+    }
+    rcu_read_unlock();
+    return ret;
+}
+
+// --- Hook 核心逻辑 ---
 static inline bool check_syscall_fastpath(int nr) {
     switch (nr) {
         case __NR_faccessat:
@@ -42,13 +78,10 @@ static inline bool check_syscall_fastpath(int nr) {
 }
 
 #ifdef CONFIG_HAVE_SYSCALL_TRACEPOINTS
-
-// 处理 init 进程执行 ksud 的特殊逻辑（原版精华）
 static void handle_init_exec(const char __user *filename) {
     char path[64];
     if (strncpy_from_user(path, filename, sizeof(path)) > 0) {
         if (strcmp(path, KSUD_PATH) == 0) {
-            pr_info("ksu: escape to root for init: %d\n", current->pid);
             escape_to_root_for_init();
         }
     }
@@ -56,12 +89,9 @@ static void handle_init_exec(const char __user *filename) {
 
 static void ksu_sys_enter_handler(void *data, struct pt_regs *regs, long id) {
     if (!check_syscall_fastpath(id)) return;
-
     if (ksu_su_compat_enabled) {
-        // execve 拦截
         if (id == __NR_execve) {
             const char __user **fname_user = (const char __user **)&regs->regs[0];
-            // 如果是 init 进程在执行，检查是否是 ksud
             if (current->pid == 1 || is_init(get_current_cred())) {
                 handle_init_exec(*fname_user);
             } else {
@@ -69,23 +99,20 @@ static void ksu_sys_enter_handler(void *data, struct pt_regs *regs, long id) {
             }
             return;
         }
-        // faccessat 拦截
         if (id == __NR_faccessat) {
             int dfd = (int)regs->regs[0];
             const char __user **fname_user = (const char __user **)&regs->regs[1];
             int mode = (int)regs->regs[2];
-            ksu_handle_faccessat(&dfd, fname_user, &mode, NULL);
+            ksu_handle_faccessat(&dfd, filename_user, &mode, NULL);
             return;
         }
-        // newfstatat 拦截
         if (id == __NR_newfstatat) {
             int dfd = (int)regs->regs[0];
             const char __user **fname_user = (const char __user **)&regs->regs[1];
             int flags = (int)regs->regs[3];
-            ksu_handle_stat(&dfd, fname_user, &flags);
+            ksu_handle_stat(&dfd, filename_user, &flags);
             return;
         }
-        // setresuid 拦截
         if (id == __NR_setresuid) {
             ksu_handle_setresuid((uid_t)regs->regs[0], (uid_t)regs->regs[1], (uid_t)regs->regs[2]);
             return;
@@ -95,10 +122,8 @@ static void ksu_sys_enter_handler(void *data, struct pt_regs *regs, long id) {
 #endif
 
 void ksu_syscall_hook_manager_init(void) {
-    pr_info("ksu: init hook manager (4.14 optimized)\n");
 #ifdef CONFIG_HAVE_SYSCALL_TRACEPOINTS
     if (!register_trace_sys_enter(ksu_sys_enter_handler, NULL)) {
-        pr_info("ksu: sys_enter registered\n");
         handle_process_mark(true);
     }
 #endif
