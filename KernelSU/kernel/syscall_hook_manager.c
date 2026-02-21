@@ -1,3 +1,4 @@
+//由grok重构  --26.2.21 15:16
 #include "linux/compiler.h"
 #include "linux/cred.h"
 #include "linux/printk.h"
@@ -20,10 +21,10 @@
 #include "selinux/selinux.h"
 #include "util.h"
 #include "ksud.h"
-#include <linux/uaccess.h>  // 确保包含
-#include <linux/version.h>  //grok 王朝了 还不过我弄你 fwgrok 还不过
-#include <asm/unistd.h>     //gemini 添加
-#include <asm/ptrace.h>     //gemini添加
+#include <linux/uaccess.h>
+#include <linux/version.h>
+#include <asm/unistd.h>
+#include <asm/ptrace.h>
 
 // Tracepoint registration count management
 // == 1: just us
@@ -67,7 +68,7 @@ void ksu_unmark_all_process(void)
     pr_info("hook_manager: unmark all user process done!\n");
 }
 
-static void ksu_mark_running_process_locked()
+static void ksu_mark_running_process_locked(void)
 {
     struct task_struct *p, *t;
     read_lock(&tasklist_lock);
@@ -97,7 +98,7 @@ static void ksu_mark_running_process_locked()
     read_unlock(&tasklist_lock);
 }
 
-void ksu_mark_running_process()
+void ksu_mark_running_process(void)
 {
     unsigned long flags;
     spin_lock_irqsave(&tracepoint_reg_lock, flags);
@@ -245,7 +246,6 @@ static inline bool check_syscall_fastpath(int nr)
     case __NR_execve:
     case __NR_setresuid:
     case __NR_clone:
-    //case __NR_clone3:  //4.14内核无
         return true;
     default:
         return false;
@@ -269,15 +269,12 @@ int ksu_handle_init_mark_tracker(const char __user **filename_user)
     memset(path, 0, sizeof(path));
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5,10,0)
-    // 新内核使用 nofault 版本（安全，不触发 page fault）
     ret = strncpy_from_user_nofault(path, fn, sizeof(path));
 #else
-    // 4.14 使用标准 strncpy_from_user（可能触发 fault，但我们已检查访问）
     ret = strncpy_from_user(path, fn, sizeof(path));
 #endif
 
     if (ret < 0) {
-        // 尝试设置访问标志后重试（保留你原逻辑）
         if (try_set_access_flag(addr)) {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5,10,0)
             ret = strncpy_from_user_nofault(path, fn, sizeof(path));
@@ -290,14 +287,14 @@ int ksu_handle_init_mark_tracker(const char __user **filename_user)
 
     if (ret < 0) {
         pr_warn("ksu_handle_init_mark_tracker: failed to copy path, ret=%ld\n", ret);
-        return ret;  // 直接返回错误，避免后续崩溃
+        return ret;
     }
 
     if (unlikely(ret >= sizeof(path))) {
         pr_warn("ksu_handle_init_mark_tracker: path too long, truncated\n");
         path[sizeof(path) - 1] = '\0';
     } else {
-        path[ret] = '\0';  // 确保字符串结束
+        path[ret] = '\0';
     }
 
     if (unlikely(strcmp(path, KSUD_PATH) == 0)) {
@@ -313,55 +310,13 @@ int ksu_handle_init_mark_tracker(const char __user **filename_user)
     return 0;
 }
 
-        // Handle setresuid
-        if (id == __NR_setresuid) {
-            uid_t ruid = (uid_t)PT_REGS_PARM1(regs);
-            uid_t euid = (uid_t)PT_REGS_PARM2(regs);
-            uid_t suid = (uid_t)PT_REGS_PARM3(regs);
-            ksu_handle_setresuid(ruid, euid, suid);
-            return;
-        }
-
-#ifdef CONFIG_KSU_MANUAL_SU
-        // Handle task_alloc via clone/fork
-        if (id == __NR_clone/* || id == __NR_clone3*/)//做4.14内核处理
-            return ksu_handle_task_alloc(regs);
-#endif
-    }
-}
-#endif
-
-void ksu_syscall_hook_manager_init(void)
-{
-    int ret;
-    pr_info("hook_manager: ksu_hook_manager_init called\n");
-
-#ifdef CONFIG_KRETPROBES
-    // Register kretprobe for syscall_regfunc
-    syscall_regfunc_rp =
-        init_kretprobe("syscall_regfunc", syscall_regfunc_handler);
-    // Register kretprobe for syscall_unregfunc
-    syscall_unregfunc_rp =
-        init_kretprobe("syscall_unregfunc", syscall_unregfunc_handler);
-#endif
-
+// 唯一的 handler 定义（放在 #ifdef 内，避免重复和 scope 错误）
 #ifdef CONFIG_HAVE_SYSCALL_TRACEPOINTS
-
-#ifndef PT_REGS_PARM1
-#define PT_REGS_PARM1(regs) ((regs)->regs[0])
-#define PT_REGS_PARM2(regs) ((regs)->regs[1])
-#define PT_REGS_PARM3(regs) ((regs)->regs[2])
-#define PT_REGS_SYSCALL_PARM4(regs) ((regs)->regs[3])
-#endif
-
-#ifdef CONFIG_HAVE_SYSCALL_TRACEPOINTS  //参数提取宏兼容性处理 (适配 4.14 ARM64)
 
 static void ksu_sys_enter_handler(void *data, struct pt_regs *regs, long id)
 {
-    // check_syscall_fastpath 如果报错，请确保包含对应头文件或临时设为 1
     if (unlikely(check_syscall_fastpath(id))) {
         if (ksu_su_compat_enabled) {
-            
             // Handle newfstatat
             if (id == __NR_newfstatat) {
                 int dfd = (int)PT_REGS_PARM1(regs);
@@ -383,7 +338,6 @@ static void ksu_sys_enter_handler(void *data, struct pt_regs *regs, long id)
             // Handle execve
             if (id == __NR_execve) {
                 const char __user **filename_user = (const char __user **)&PT_REGS_PARM1(regs);
-                // 这里的 get_current_cred() 在 4.14 是标准的
                 if (current->pid != 1 && is_init(get_current_cred())) {
                     ksu_handle_init_mark_tracker(filename_user);
                 } else {
@@ -392,25 +346,37 @@ static void ksu_sys_enter_handler(void *data, struct pt_regs *regs, long id)
                 return;
             }
 
-            // setresuid hook (4.14 核心权限控制)
+            // setresuid hook
             if (id == __NR_setresuid) {
-                // 如果需要记录，可以在此添加调用逻辑
+                uid_t ruid = (uid_t)PT_REGS_PARM1(regs);
+                uid_t euid = (uid_t)PT_REGS_PARM2(regs);
+                uid_t suid = (uid_t)PT_REGS_PARM3(regs);
+                ksu_handle_setresuid(ruid, euid, suid);
+                return;
             }
 
-            // clone hook (4.14 仅处理标准 clone)
+#ifdef CONFIG_KSU_MANUAL_SU
+            // Handle task_alloc via clone
             if (id == __NR_clone) {
-                // 可以在此处理 namespace 隔离逻辑
+                return ksu_handle_task_alloc(regs);
             }
+#endif
         }
     }
 }
 
 #endif /* CONFIG_HAVE_SYSCALL_TRACEPOINTS */
 
-// 3. 修好的 Init 函数
+// Init 函数
 int ksu_syscall_hook_manager_init(void)
 {
     int ret = 0;
+    pr_info("hook_manager: ksu_hook_manager_init called\n");
+
+#ifdef CONFIG_KRETPROBES
+    syscall_regfunc_rp = init_kretprobe("syscall_regfunc", syscall_regfunc_handler);
+    syscall_unregfunc_rp = init_kretprobe("syscall_unregfunc", syscall_unregfunc_handler);
+#endif
 
 #ifdef CONFIG_HAVE_SYSCALL_TRACEPOINTS
     ret = register_trace_sys_enter(ksu_sys_enter_handler, NULL);
@@ -420,31 +386,31 @@ int ksu_syscall_hook_manager_init(void)
         pr_info("ksu: sys_enter tracepoint registered\n");
     }
 
-    // 针对 4.14 的稳定性优化：如果 KRETPROBES 没开，跳过不确定的符号调用
-#if defined(CONFIG_KRETPROBES)
-    // 正常执行原有逻辑
-#else
-    // ksu_mark_running_process_locked(); // 在 4.14 上如果链接报错就注释掉这行
+#ifndef CONFIG_KRETPROBES
+    ksu_mark_running_process_locked();
 #endif
-
 #endif /* CONFIG_HAVE_SYSCALL_TRACEPOINTS */
 
     ksu_setuid_hook_init();
     ksu_sucompat_init();
 
-    return 0; // 强制返回 0 确保内核启动不因 Hook 失败而挂掉
+    return 0;  // 强制返回 0，避免 init 失败影响内核启动
 }
 
+// Exit 函数
 void ksu_syscall_hook_manager_exit(void)
 {
+    pr_info("hook_manager: ksu_hook_manager_exit called\n");
+
 #ifdef CONFIG_HAVE_SYSCALL_TRACEPOINTS
     unregister_trace_sys_enter(ksu_sys_enter_handler, NULL);
     tracepoint_synchronize_unregister();
+    pr_info("hook_manager: sys_enter tracepoint unregistered\n");
 #endif
 
 #ifdef CONFIG_KRETPROBES
-    // 这里如果报错，说明 syscall_regfunc_rp 没定义，包在 #ifdef 里是安全的
-    // destroy_kretprobe(&syscall_regfunc_rp);
+    destroy_kretprobe(&syscall_regfunc_rp);
+    destroy_kretprobe(&syscall_unregfunc_rp);
 #endif
 
     ksu_sucompat_exit();
