@@ -1,6 +1,6 @@
 name: Build(rsuntk KSU)OppoK7x (PERM00) (Color A12)
 
-于:
+on:
   push:
   workflow_dispatch:
   schedule:
