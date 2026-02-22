@@ -78,6 +78,15 @@ jobs:
         echo "CONFIG_HAVE_KPROBES=n" >> arch/arm64/configs/mt6853-ss_defconfig
 
         make O=out savedefconfig
+        # 永久设 SELinux 为 permissive（开机默认 permissive，避免 KSU hook 被挡）
+        sed -i '/CONFIG_SECURITY_SELINUX=/d' arch/arm64/configs/mt6853-ss_defconfig
+        sed -i '/CONFIG_SECURITY_SELINUX_BOOTPARAM=/d' arch/arm64/configs/mt6853-ss_defconfig
+        sed -i '/CONFIG_SECURITY_SELINUX_DEVELOP=/d' arch/arm64/configs/mt6853-ss_defconfig
+
+        echo "CONFIG_SECURITY_SELINUX=y" >> arch/arm64/configs/mt6853-ss_defconfig
+        echo "CONFIG_SECURITY_SELINUX_BOOTPARAM=y" >> arch/arm64/configs/mt6853-ss_defconfig
+        echo "CONFIG_SECURITY_SELINUX_BOOTPARAM_VALUE=0" >> arch/arm64/configs/mt6853-ss_defconfig
+        echo "CONFIG_SECURITY_SELINUX_DEVELOP=y" >> arch/arm64/configs/mt6853-ss_defconfig
         cp out/defconfig arch/arm64/configs/mt6853-ss_defconfig
 
     - name: 设置 ccache 加速编译
