@@ -92,8 +92,9 @@ jobs:
         export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang-aosp/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc64/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc32/bin:$PATH
         export ARCH=arm64
         export SUBARCH=arm64
-        export KBUILD_BUILD_HOST="企鹅交流:722651738"
-        export KBUILD_BUILD_USER="kuan-jsbsbxjxh66"
+        export KBUILD_BUILD_HOST="GitHub@sanba0519"
+        export KBUILD_BUILD_USER="coolapk-sanba"
+        export LOCALVERSION="酷安-三笆-GitHub@sanba0519"
 
         make -j$(nproc --all) O=out \
           CC="ccache clang" \
