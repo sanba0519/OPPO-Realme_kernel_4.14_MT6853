@@ -1,4 +1,4 @@
-name: 编译OPPO/Realme 安卓12 通用 MT6853 机型内核（集成 rsuntk KernelSU）
+name: Build(rsuntk KSU)OppoK7x (PERM00) (Color A12)
 
 on:
   push:
@@ -103,31 +103,30 @@ jobs:
           LD=ld.lld \
           Image.gz-dtb 2>&1 | tee build.log
 
-    - name: 制作 AnyKernel3 卡刷包
+    - name: 制作Anykernel3卡刷包
+      if: success()
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace
-        git clone --depth=1 https://github.com/osm0sis/AnyKernel3
-        cd AnyKernel3
-        sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel.sh
-        sed -i 's!block=/dev/block/platform/omap/omap_hsmmc.0/by-name/boot;!block=auto;!g' anykernel.sh
-        sed -i 's/is_slot_device=0;/is_slot_device=auto;/g' anykernel.sh
+        git clone https://github.com/osm0sis/AnyKernel3
+        sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel3/anykernel.sh
+        sed -i 's!block=/dev/block/platform/omap/omap_hsmmc.0/by-name/boot;!block=/dev/block/by-name/boot;!g' AnyKernel3/anykernel.sh
+        sed -i 's/is_slot_device=0;/is_slot_device=auto;/g' AnyKernel3/anykernel.sh
+        cp android-kernel/out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
+        rm -rf AnyKernel3/.git* AnyKernel3/README.md
 
-        cp ../android-kernel/out/arch/arm64/boot/Image* ./
-
-        # 打包 zip，带日期
-        zip -r9 ../MT6853-rsuntkKSU-$(date +%Y%m%d-%H%M).zip * -x .git README.md *placeholder
-
-    - name: 上传 AnyKernel3 zip 包
+    - name: 上传 Anykernel3
+      if: success()
       uses: actions/upload-artifact@v4
       with:
-        name: MT6853-rsuntkKSU-AnyKernel3
-        path: kernel_workspace/MT6853-rsuntkKSU-*.zip
+        name: android-mtk6853-kernel-Anykernel3
+        path: kernel_workspace/AnyKernel3/*
 
-    - name: 上传原始 Image 文件
+    - name: 上传编译内核
+      if: success()
       uses: actions/upload-artifact@v4
       with:
-        name: MT6853-Image.gz-dtb
-        path: kernel_workspace/android-kernel/out/arch/arm64/boot/Image*
+        name: mtk6853-Image.gz
+        path: kernel_workspace/android-kernel/out/arch/arm64/boot/Image.gz
 
     - name: 上传编译日志（无论成功或失败）
       if: always()
