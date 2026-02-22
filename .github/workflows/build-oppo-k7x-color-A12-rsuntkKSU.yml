@@ -1,0 +1,133 @@
+name: Build(rsuntk KSU)OppoK7x (PERM00) (Color A12)
+
+on:
+  push:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 5'  # 每周五凌晨运行
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+    - name: 检出仓库
+      uses: actions/checkout@v4
+
+    - name: 安装编译环境依赖
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y --no-install-recommends \
+          git make bc bison ccache openssl dos2unix zip unzip kmod cpio flex \
+          libelf-dev curl libssl-dev libtfm-dev wget device-tree-compiler ca-certificates \
+          python3 python-is-python3 binutils binutils-aarch64-linux-gnu \
+          binutils-arm-linux-gnueabi gcc-multilib g++-multilib libc6-dev-i386 \
+          libncurses5 libncursesw5-dev rsync
+
+        mkdir -p $GITHUB_WORKSPACE/kernel_workspace
+
+    - name: 下载 GCC 工具链（Google 4.9）
+      run: |
+        cd $GITHUB_WORKSPACE/kernel_workspace
+        mkdir -p gcc64 gcc32
+        wget -qO gcc-aarch64.tar.gz https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/tags/android-12.1.0_r27.tar.gz
+        tar -C gcc64/ -xzf gcc-aarch64.tar.gz
+        wget -qO gcc-arm.tar.gz https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/+archive/refs/tags/android-12.1.0_r27.tar.gz
+        tar -C gcc32/ -xzf gcc-arm.tar.gz
+
+    - name: 下载 Clang（crDroid clang-10）
+      run: |
+        cd $GITHUB_WORKSPACE/kernel_workspace
+        git clone --depth=1 https://github.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-6443078 -b 10.0 clang-aosp
+
+    - name: 下载内核源码
+      run: |
+        cd $GITHUB_WORKSPACE/kernel_workspace
+        git clone --depth=1 https://github.com/wu17481748/android_kernel_mtk6853 android-kernel
+        cd android-kernel
+
+    - name: 集成 rsuntk KernelSU（fork 版，适合老内核）
+      run: |
+        cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
+        if [ -d "KernelSU" ]; then rm -rf KernelSU; fi
+        curl -LSs "https://raw.githubusercontent.com/rsuntk/KernelSU/main/kernel/setup.sh" | bash -s main
+        # 如果 main 分支有问题，可改成 legacy 版本：bash -s v3.0.0-30-legacy
+
+    - name: 重新生成 defconfig 并禁用 KPROBES（避免 panic/编译问题）
+      run: |
+        cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
+        export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang-aosp/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc64/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc32/bin:$PATH
+        export ARCH=arm64
+        export SUBARCH=arm64
+
+        make O=out mt6853-ss_defconfig
+
+        # 强制禁用 KPROBES（推荐方式：编辑 defconfig 文件，永久生效）
+        sed -i '/CONFIG_KPROBES=/d' arch/arm64/configs/mt6853-ss_defconfig
+        sed -i '/CONFIG_KPROBE_EVENTS=/d' arch/arm64/configs/mt6853-ss_defconfig
+        sed -i '/CONFIG_HAVE_KPROBES=/d' arch/arm64/configs/mt6853-ss_defconfig
+        sed -i '/CONFIG_FTRACE=/d' arch/arm64/configs/mt6853-ss_defconfig  # 可选，一起关避免依赖问题
+
+        echo "CONFIG_KPROBES=n" >> arch/arm64/configs/mt6853-ss_defconfig
+        echo "CONFIG_KPROBE_EVENTS=n" >> arch/arm64/configs/mt6853-ss_defconfig
+        echo "CONFIG_HAVE_KPROBES=n" >> arch/arm64/configs/mt6853-ss_defconfig
+        echo "CONFIG_FTRACE=n" >> arch/arm64/configs/mt6853-ss_defconfig  # 可选
+
+        make O=out savedefconfig
+        cp out/defconfig arch/arm64/configs/mt6853-ss_defconfig
+
+    - name: 设置 ccache 加速编译
+      uses: hendrikmuhs/ccache-action@v1.2
+      with:
+        key: mtk6853-rsuntk-ksu-${{ github.sha }}
+        max-size: 3G
+
+    - name: 开始编译内核
+      run: |
+        cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
+        export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang-aosp/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc64/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc32/bin:$PATH
+        export ARCH=arm64
+        export SUBARCH=arm64
+        export KBUILD_BUILD_HOST="企鹅交流:722651738"
+        export KBUILD_BUILD_USER="kuan-jsbsbxjxh66"
+
+        make -j$(nproc --all) O=out \
+          CC="ccache clang" \
+          CLANG_TRIPLE=aarch64-linux-gnu- \
+          CROSS_COMPILE=aarch64-linux-android- \
+          CROSS_COMPILE_ARM32=arm-linux-androideabi- \
+          LD=ld.lld \
+          Image.gz-dtb 2>&1 | tee build.log
+
+    - name: 制作 AnyKernel3 卡刷包
+      run: |
+        cd $GITHUB_WORKSPACE/kernel_workspace
+        git clone --depth=1 https://github.com/osm0sis/AnyKernel3
+        cd AnyKernel3
+        sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel.sh
+        sed -i 's!block=/dev/block/platform/omap/omap_hsmmc.0/by-name/boot;!block=auto;!g' anykernel.sh
+        sed -i 's/is_slot_device=0;/is_slot_device=auto;/g' anykernel.sh
+
+        cp ../android-kernel/out/arch/arm64/boot/Image* ./
+
+        # 打包 zip，带日期
+        zip -r9 ../MT6853-rsuntkKSU-$(date +%Y%m%d-%H%M).zip * -x .git README.md *placeholder
+
+    - name: 上传 AnyKernel3 zip 包
+      uses: actions/upload-artifact@v4
+      with:
+        name: MT6853-rsuntkKSU-AnyKernel3
+        path: kernel_workspace/MT6853-rsuntkKSU-*.zip
+
+    - name: 上传原始 Image 文件
+      uses: actions/upload-artifact@v4
+      with:
+        name: MT6853-Image.gz-dtb
+        path: kernel_workspace/android-kernel/out/arch/arm64/boot/Image*
+
+    - name: 上传编译日志（无论成功或失败）
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-log-mt6853-rsuntk
+        path: kernel_workspace/android-kernel/build.log
