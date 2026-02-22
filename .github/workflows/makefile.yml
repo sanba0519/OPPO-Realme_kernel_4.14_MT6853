@@ -69,11 +69,13 @@ jobs:
     - name: 开始编译内核
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
+        make O=out clean || true
+        make O=out mrproper || true
         export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang-aosp/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc64/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc32/bin:$PATH
         export KBUILD_BUILD_HOST=GitHub@sanba0519
         export KBUILD_BUILD_USER=coolapk-三笆
-        make -s -j$(nproc --all) O=out ARCH=arm64 mt6853-ss_defconfig
-        make -j$(nproc --all) CC="ccache clang" O=out ARCH=arm64 CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-android- CROSS_COMPILE_ARM32=arm-linux-androideabi- LD=ld.lld
+        make -s -j$(nproc --all) O=out ARCH=arm64 mt6853-ss_defconfig LOCALVERSION="-酷安-三笆-GitHub-@sanba0519"
+        make -j$(nproc --all) CC="ccache clang" O=out ARCH=arm64 CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-android- CROSS_COMPILE_ARM32=arm-linux-androideabi- LD=ld.lld LOCALVERSION="-酷安-三笆-GitHub-@sanba0519"
                 
 
     - name: 制作Anykernel3卡刷包
