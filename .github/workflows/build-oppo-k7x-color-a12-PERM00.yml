@@ -101,7 +101,7 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
           
-          make O=out ARCH=arm64 mt6853-ss_defconfig
+          make O=out ARCH=arm64 mt6853-ss_defconfig LOCALVERSION="-酷安-三笆-GitHub-@sanba0519"
           
           CONFIG_FILE="out/.config"
           cp "$CONFIG_FILE" "$CONFIG_FILE.bak"
@@ -132,10 +132,13 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
           export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang-aosp/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc64/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc32/bin:$PATH
+           
+          make O=out clean || true
+          make O=out mrproper || true
           export KBUILD_BUILD_HOST=GitHub@sanba0519
           export KBUILD_BUILD_USER=GitHub@sanba0519
           
-          make -s O=out ARCH=arm64 mt6853-ss_defconfig
+          make -s O=out ARCH=arm64 mt6853-ss_defconfig LOCALVERSION="-酷安-三笆-GitHub-@sanba0519"
           make -j12 CC="ccache clang" O=out ARCH=arm64 \
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-android- \
