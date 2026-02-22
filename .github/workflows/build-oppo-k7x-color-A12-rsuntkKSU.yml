@@ -46,11 +46,11 @@ jobs:
         git clone --depth=1 https://github.com/sanba0519/android_kernel_4.14_MT6853 android-kernel
         cd android-kernel
 
-    - name: 集成 rsuntk KernelSU（fork 版，适合老内核）
+    - name: 集成 rsuntk KernelSU（fork 版，main 分支）
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
         if [ -d "KernelSU" ]; then rm -rf KernelSU; fi
-        curl -LSs "https://raw.githubusercontent.com/rsuntk/KernelSU/main/kernel/setup.sh" | bash -s v3.0.0-30-legacy
+        curl -LSs "https://raw.githubusercontent.com/rsuntk/KernelSU/main/kernel/setup.sh" | bash -s main
 
     - name: 重新生成 defconfig 并禁用 KPROBES（避免 panic/编译问题，但保持 FTRACE）
       run: |
@@ -77,16 +77,10 @@ jobs:
         echo "CONFIG_KPROBE_EVENTS=n" >> arch/arm64/configs/mt6853-ss_defconfig
         echo "CONFIG_HAVE_KPROBES=n" >> arch/arm64/configs/mt6853-ss_defconfig
 
-        make O=out savedefconfig
-        # 永久设 SELinux 为 permissive（开机默认 permissive，避免 KSU hook 被挡）
-        sed -i '/CONFIG_SECURITY_SELINUX=/d' arch/arm64/configs/mt6853-ss_defconfig
-        sed -i '/CONFIG_SECURITY_SELINUX_BOOTPARAM=/d' arch/arm64/configs/mt6853-ss_defconfig
-        sed -i '/CONFIG_SECURITY_SELINUX_DEVELOP=/d' arch/arm64/configs/mt6853-ss_defconfig
+        # 打印 KSU 相关 config 到 artifact 文件（调试用）
+        grep -i "ksu\|ksu_" out/.config > $GITHUB_WORKSPACE/ksu_config.txt || echo "No KSU config found" > $GITHUB_WORKSPACE/ksu_config.txt
 
-        echo "CONFIG_SECURITY_SELINUX=y" >> arch/arm64/configs/mt6853-ss_defconfig
-        echo "CONFIG_SECURITY_SELINUX_BOOTPARAM=y" >> arch/arm64/configs/mt6853-ss_defconfig
-        echo "CONFIG_SECURITY_SELINUX_BOOTPARAM_VALUE=0" >> arch/arm64/configs/mt6853-ss_defconfig
-        echo "CONFIG_SECURITY_SELINUX_DEVELOP=y" >> arch/arm64/configs/mt6853-ss_defconfig
+        make O=out savedefconfig
         cp out/defconfig arch/arm64/configs/mt6853-ss_defconfig
 
     - name: 设置 ccache 加速编译
@@ -112,16 +106,21 @@ jobs:
           LD=ld.lld \
           Image.gz-dtb 2>&1 | tee build.log
 
-    - name: 制作Anykernel3卡刷包
+    - name: 制作Anykernel3卡刷包（强制 permissive）
       if: success()
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace
         git clone https://github.com/osm0sis/AnyKernel3
-        sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel3/anykernel.sh
-        sed -i 's!block=/dev/block/platform/omap/omap_hsmmc.0/by-name/boot;!block=/dev/block/by-name/boot;!g' AnyKernel3/anykernel.sh
-        sed -i 's/is_slot_device=0;/is_slot_device=auto;/g' AnyKernel3/anykernel.sh
-        cp android-kernel/out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
-        rm -rf AnyKernel3/.git* AnyKernel3/README.md
+        cd AnyKernel3
+        sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel.sh
+        sed -i 's!block=/dev/block/platform/omap/omap_hsmmc.0/by-name/boot;!block=/dev/block/by-name/boot;!g' anykernel.sh
+        sed -i 's/is_slot_device=0;/is_slot_device=auto;/g' anykernel.sh
+
+        # 强制 permissive（从 cmdline 覆盖）
+        echo 'cmdline+=" androidboot.selinux=permissive"' >> anykernel.sh
+
+        cp ../android-kernel/out/arch/arm64/boot/Image.gz-dtb Image.gz-dtb
+        rm -rf .git* README.md
 
     - name: 上传 Anykernel3
       if: success()
@@ -137,9 +136,11 @@ jobs:
         name: mtk6853-Image.gz
         path: kernel_workspace/android-kernel/out/arch/arm64/boot/Image.gz
 
-    - name: 上传编译日志（无论成功或失败）
+    - name: 上传编译日志 & KSU config（调试用）
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: build-log-mt6853-rsuntk
-        path: kernel_workspace/android-kernel/build.log
+        name: build-log-and-ksu-config
+        path: |
+          kernel_workspace/android-kernel/build.log
+          kernel_workspace/ksu_config.txt
