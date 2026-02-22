@@ -1,4 +1,4 @@
-name: Build(rsuntk KSU)OppoK7x (PERM00) (Color A12)
+name: 编译OPPO/Realme 安卓12 通用 MT6853 机型内核（集成 rsuntk KernelSU）
 
 on:
   push:
@@ -43,40 +43,39 @@ jobs:
     - name: 下载内核源码
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace
-        git clone --depth=1 https://github.com/sanba0519/android_kernel_4.14_MT6853 android-kernel  # 改成你的仓库
+        git clone --depth=1 https://github.com/sanba0519/android_kernel_4.14_MT6853 android-kernel
         cd android-kernel
 
     - name: 集成 rsuntk KernelSU（fork 版，适合老内核）
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
         if [ -d "KernelSU" ]; then rm -rf KernelSU; fi
-        curl -LSs "https://raw.githubusercontent.com/rsuntk/KernelSU/main/kernel/setup.sh" | bash -s v3.0.0-30-legacy  # 换 legacy 分支
+        curl -LSs "https://raw.githubusercontent.com/rsuntk/KernelSU/main/kernel/setup.sh" | bash -s v3.0.0-30-legacy
 
-    - name: 重新生成 defconfig 并禁用 KPROBES（避免 panic/编译问题）
+    - name: 重新生成 defconfig 并禁用 KPROBES（避免 panic/编译问题，但保持 FTRACE）
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
         export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang-aosp/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc64/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc32/bin:$PATH
         export ARCH=arm64
         export SUBARCH=arm64
 
+        rm -rf out/  # Clean old out/ to avoid residuals
+
         make O=out mt6853-ss_defconfig
 
-        # 用 scripts/config 直接编辑 .config（更可靠）
+        # 只禁用 KPROBES 相关（用 scripts/config 编辑 .config）
         scripts/config --file out/.config --disable KPROBES
         scripts/config --file out/.config --disable KPROBE_EVENTS
         scripts/config --file out/.config --disable HAVE_KPROBES
-        scripts/config --file out/.config --disable FTRACE  # 可选
 
-        # 也编辑 defconfig 文件（永久）
+        # 编辑 defconfig 文件（永久生效，不禁用 FTRACE）
         sed -i '/CONFIG_KPROBES=/d' arch/arm64/configs/mt6853-ss_defconfig
         sed -i '/CONFIG_KPROBE_EVENTS=/d' arch/arm64/configs/mt6853-ss_defconfig
         sed -i '/CONFIG_HAVE_KPROBES=/d' arch/arm64/configs/mt6853-ss_defconfig
-        sed -i '/CONFIG_FTRACE=/d' arch/arm64/configs/mt6853-ss_defconfig
 
         echo "CONFIG_KPROBES=n" >> arch/arm64/configs/mt6853-ss_defconfig
         echo "CONFIG_KPROBE_EVENTS=n" >> arch/arm64/configs/mt6853-ss_defconfig
         echo "CONFIG_HAVE_KPROBES=n" >> arch/arm64/configs/mt6853-ss_defconfig
-        echo "CONFIG_FTRACE=n" >> arch/arm64/configs/mt6853-ss_defconfig
 
         make O=out savedefconfig
         cp out/defconfig arch/arm64/configs/mt6853-ss_defconfig
