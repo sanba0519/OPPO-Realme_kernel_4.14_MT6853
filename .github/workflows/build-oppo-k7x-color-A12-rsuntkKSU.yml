@@ -94,7 +94,6 @@ jobs:
         export SUBARCH=arm64
         export KBUILD_BUILD_HOST="GitHub@sanba0519"
         export KBUILD_BUILD_USER="coolapk-sanba"
-        export LOCALVERSION="酷安-三笆-GitHub@sanba0519"
 
         make -j$(nproc --all) O=out \
           CC="ccache clang" \
