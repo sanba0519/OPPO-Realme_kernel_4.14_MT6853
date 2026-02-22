@@ -111,12 +111,16 @@ jobs:
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace
         git clone https://github.com/osm0sis/AnyKernel3
-        sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel3/anykernel.sh
-        sed -i 's!block=/dev/block/platform/omap/omap_hsmmc.0/by-name/boot;!block=/dev/block/by-name/boot;!g' AnyKernel3/anykernel.sh
-        sed -i 's/is_slot_device=0;/is_slot_device=auto;/g' AnyKernel3/anykernel.sh
-        echo 'cmdline="androidboot.selinux=permissive"' >> anykernel.sh
-        cp android-kernel/out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
-        rm -rf AnyKernel3/.git* AnyKernel3/README.md
+        cd AnyKernel3
+        sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel.sh
+        sed -i 's!block=/dev/block/platform/omap/omap_hsmmc.0/by-name/boot;!block=/dev/block/by-name/boot;!g' anykernel.sh
+        sed -i 's/is_slot_device=0;/is_slot_device=auto;/g' anykernel.sh
+
+        # 强制 permissive（从 cmdline 覆盖）
+        echo 'cmdline+=" androidboot.selinux=permissive"' >> anykernel.sh
+
+        cp ../android-kernel/out/arch/arm64/boot/Image.gz-dtb Image.gz-dtb
+        rm -rf .git* README.md
 
     - name: 上传 Anykernel3
       if: success()
@@ -136,5 +140,7 @@ jobs:
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: build-log-mt6853-rsuntk
-        path: kernel_workspace/android-kernel/build.log
+        name: build-log-and-ksu-config
+        path: |
+          kernel_workspace/android-kernel/build.log
+          kernel_workspace/ksu_config.txt
