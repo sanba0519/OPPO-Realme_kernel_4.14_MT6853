@@ -46,48 +46,44 @@ jobs:
         git clone --depth=1 https://github.com/sanba0519/android_kernel_4.14_MT6853 android-kernel
         cd android-kernel
 
-    - name: 手动集成 rsuntk KernelSU + 清理编码
+    - name: 手动集成 rsuntk KernelSU + 终极路径修复
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
         
-        # 1. 清理旧 KSU
+        # 1. 彻底清理环境
         rm -rf drivers/kernelsu
+        sed -i '/kernelsu/d' drivers/Kconfig
+        sed -i '/kernelsu/d' drivers/Makefile
         
-        # 2. 克隆最新
+        # 2. 克隆 RKSU
         git clone --depth=1 https://github.com/rsuntk/KernelSU drivers/kernelsu -b main
         
-        # 3. 清理 Oppo Kconfig 编码问题（CRLF / 不可见字符）
+        # 3. 解决 Kconfig 找不到的问题 (关键修复)
+        # 报错说找不到 drivers/kernelsu/Kconfig，那我们就直接在那个位置放一个软链接
+        # 指向它真正的 Kconfig 位置
+        ln -sf $(pwd)/drivers/kernelsu/kernel/Kconfig drivers/kernelsu/Kconfig
+        ln -sf $(pwd)/drivers/kernelsu/kernel/Makefile drivers/kernelsu/Makefile
+
+        # 4. 在 drivers/Kconfig 最开头注入，避免插在 endmenu 后面被忽略
+        sed -i '1i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
+        echo "obj-\$(CONFIG_KSU) += kernelsu/" >> drivers/Makefile
+        
+        # 5. 清理 Oppo 的编码乱码
         find drivers/soc/oplus -name "Kconfig*" -exec dos2unix {} \;
         find drivers/nfc -name "Kconfig*" -exec dos2unix {} \;
-        
-        # 4. 加 Kconfig 引用（rsuntk Kconfig 在 kernelsu/kernel/Kconfig）
-        cd drivers
-        sed -i '/endmenu/i source "kernelsu/kernel/Kconfig"' Kconfig
-        
-        # 5. 加 Makefile 引用
-        echo "obj-\$(CONFIG_KSU) += kernelsu/kernel/" >> Makefile
-        
-        # 调试输出
-        tail -n 10 Kconfig > $GITHUB_WORKSPACE/kconfig_tail.txt
-        ls -l kernelsu/kernel > $GITHUB_WORKSPACE/ksu_dir_check.txt
 
     - name: 注入 Minimalist Hooks (手动钩子)
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
         
-        # fs/open.c - 在 do_sys_open 函数体开头插入
-        sed -i '/long do_sys_open(/a \
-        extern int ksu_handle_faccessat(int *dfd, const char __user **filename, int *mode, int *flags);\
-        ksu_handle_faccessat(&dfd, &filename, &mode, &flags);' fs/open.c
+        # 使用更稳健的 sed，直接定位到函数定义的下一行
+        # fs/open.c
+        sed -i '/long do_sys_open(int/a \
+        extern int ksu_handle_faccessat(int *dfd, const char __user **filename, int *mode, int *flags);\nksu_handle_faccessat(&dfd, &filename, &mode, &flags);' fs/open.c
         
-        # fs/exec.c - 在 search_binary_handler 函数体开头插入
-        sed -i '/int search_binary_handler(/a \
-        extern int ksu_handle_execveat(int *fd, struct filename **filename, void *argv, void *envp, int *flags);\
-        ksu_handle_execveat(&bprm->fd, &bprm->filename, &bprm->argc, &bprm->envp, &bprm->flags);' fs/exec.c
-        
-        # 调试检查 hook 是否插入成功
-        grep -A 5 ksu_handle fs/open.c > $GITHUB_WORKSPACE/hook_open.txt
-        grep -A 5 ksu_handle fs/exec.c > $GITHUB_WORKSPACE/hook_exec.txt
+        # fs/exec.c
+        sed -i '/int search_binary_handler(struct/a \
+        extern int ksu_handle_execveat(int *fd, struct filename **filename, void *argv, void *envp, int *flags);\nksu_handle_execveat(&bprm->fd, &bprm->filename, &bprm->argc, &bprm->envp, &bprm->flags);' fs/exec.c
 
     - name: 配置内核并开启 KSU
       run: |
