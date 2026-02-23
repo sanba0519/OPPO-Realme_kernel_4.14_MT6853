@@ -53,21 +53,17 @@ jobs:
         git clone --depth=1 https://github.com/rsuntk/KernelSU drivers/kernelsu -b main
 
         # 检查 clone 是否成功
-        ls drivers/kernelsu/kernel || echo "Clone failed, no kernel dir"
+        ls drivers/kernelsu/kernel || echo "Clone failed, no kernel dir" > $GITHUB_WORKSPACE/clone_check.txt
 
-        # 进入 drivers 目录加 Kconfig
+        # 加 Kconfig 到 drivers/Kconfig（修正路径）
         cd drivers
-        # 修正 source 路径为 kernelsu/kernel/Kconfig
         grep -q "source \"kernelsu/kernel/Kconfig\"" Kconfig || echo 'source "kernelsu/kernel/Kconfig"' >> Kconfig
 
         # 加 Makefile
         grep -q "obj-\$(CONFIG_KSU)" Makefile || echo "obj-\$(CONFIG_KSU) += kernelsu/" >> Makefile
 
-        # 检查 Kconfig 是否加成功
-        tail -n 5 Kconfig > $GITHUB_WORKSPACE/kconfig_tail.txt
-
-        # 回到根目录
-        cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
+        # 调试输出 Kconfig 最后几行
+        tail -n 10 Kconfig > $GITHUB_WORKSPACE/kconfig_tail.txt
 
     - name: 重新生成 defconfig + 强制开启 KSU 和 manual hook
       run: |
@@ -80,18 +76,18 @@ jobs:
 
         make O=out mt6853-ss_defconfig
 
-        # 强制开启 KSU 和最小化钩子（manual hook）
+        # 强制开启 KSU 和最小化钩子
         scripts/config --file out/.config --enable KSU
         scripts/config --file out/.config --enable KSU_MANUAL_HOOK
         scripts/config --file out/.config --disable KSU_USE_KPROBES
 
-        # 也写到 defconfig 文件（永久）
+        # 写到 defconfig
         echo "CONFIG_KSU=y" >> arch/arm64/configs/mt6853-ss_defconfig
         echo "CONFIG_KSU_MANUAL_HOOK=y" >> arch/arm64/configs/mt6853-ss_defconfig
         echo "CONFIG_KSU_USE_KPROBES=n" >> arch/arm64/configs/mt6853-ss_defconfig
 
         # 打印 KSU config 调试
-        grep -i "ksu" out/.config > $GITHUB_WORKSPACE/ksu_config.txt || echo "No KSU config" > $GITHUB_WORKSPACE/ksu_config.txt
+        grep -i "ksu" out/.config > $GITHUB_WORKSPACE/ksu_config.txt || echo "No KSU config found" > $GITHUB_WORKSPACE/ksu_config.txt
 
         make O=out savedefconfig
         cp out/defconfig arch/arm64/configs/mt6853-ss_defconfig
