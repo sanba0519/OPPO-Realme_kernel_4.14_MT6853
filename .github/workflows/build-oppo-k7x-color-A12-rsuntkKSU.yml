@@ -52,12 +52,12 @@ jobs:
         if [ -d "drivers/kernelsu" ]; then rm -rf drivers/kernelsu; fi
         git clone --depth=1 https://github.com/rsuntk/KernelSU drivers/kernelsu -b main
 
-        # 检查 clone 是否成功
-        ls drivers/kernelsu/kernel || echo "Clone failed, no kernel dir" > $GITHUB_WORKSPACE/clone_check.txt
+        # 检查 clone 是否成功（看有没有 Kconfig 文件）
+        ls drivers/kernelsu/Kconfig || echo "Clone failed or no Kconfig in root" > $GITHUB_WORKSPACE/clone_check.txt
 
-        # 加 Kconfig 到 drivers/Kconfig（修正路径）
+        # 加 Kconfig 到 drivers/Kconfig（修正为 kernelsu/Kconfig）
         cd drivers
-        grep -q "source \"kernelsu/kernel/Kconfig\"" Kconfig || echo 'source "kernelsu/kernel/Kconfig"' >> Kconfig
+        grep -q "source \"kernelsu/Kconfig\"" Kconfig || echo 'source "kernelsu/Kconfig"' >> Kconfig
 
         # 加 Makefile
         grep -q "obj-\$(CONFIG_KSU)" Makefile || echo "obj-\$(CONFIG_KSU) += kernelsu/" >> Makefile
@@ -144,7 +144,7 @@ jobs:
       with:
         name: mtk6853-Image.gz
         path: kernel_workspace/android-kernel/out/arch/arm64/boot/Image.gz
-        
+
     - name: 上传编译日志 & KSU 调试文件
       if: always()
       uses: actions/upload-artifact@v4
