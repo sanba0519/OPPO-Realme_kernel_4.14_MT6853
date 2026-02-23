@@ -46,39 +46,48 @@ jobs:
         git clone --depth=1 https://github.com/sanba0519/android_kernel_4.14_MT6853 android-kernel
         cd android-kernel
 
-    - name: 集成 rsuntk KernelSU（fork 版，main 分支）
+    - name: 手动集成 rsuntk KernelSU（绕过 setup.sh 问题）
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
-        if [ -d "KernelSU" ]; then rm -rf KernelSU; fi
-        curl -LSs "https://raw.githubusercontent.com/rsuntk/KernelSU/main/kernel/setup.sh" | bash -s main
+        if [ -d "drivers/kernelsu" ]; then rm -rf drivers/kernelsu; fi
+        git clone --depth=1 https://github.com/rsuntk/KernelSU drivers/kernelsu -b main
 
-    - name: 重新生成 defconfig 并禁用 KPROBES（避免 panic/编译问题，但保持 FTRACE）
+        # 进入 KSU 目录
+        cd drivers/kernelsu/kernel
+
+        # 手动加 Kconfig 到 drivers/Kconfig
+        cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel/drivers
+        grep -q "source \"kernelsu/Kconfig\"" Kconfig || echo 'source "kernelsu/Kconfig"' >> Kconfig
+
+        # 手动加 Makefile
+        grep -q "obj-\$(CONFIG_KSU)" Makefile || echo "obj-\$(CONFIG_KSU) += kernelsu/" >> Makefile
+
+        # 回到根目录
+        cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
+
+    - name: 重新生成 defconfig + 强制开启 KSU 和 manual hook
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
         export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang-aosp/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc64/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc32/bin:$PATH
         export ARCH=arm64
         export SUBARCH=arm64
 
-        rm -rf out/  # Clean old out/ to avoid residuals
+        rm -rf out/
 
         make O=out mt6853-ss_defconfig
 
-        # 只禁用 KPROBES 相关（用 scripts/config 编辑 .config）
-        scripts/config --file out/.config --disable KPROBES
-        scripts/config --file out/.config --disable KPROBE_EVENTS
-        scripts/config --file out/.config --disable HAVE_KPROBES
+        # 强制开启 KSU 和最小化钩子（manual hook）
+        scripts/config --file out/.config --enable KSU
+        scripts/config --file out/.config --enable KSU_MANUAL_HOOK
+        scripts/config --file out/.config --disable KSU_USE_KPROBES
 
-        # 编辑 defconfig 文件（永久生效，不禁用 FTRACE）
-        sed -i '/CONFIG_KPROBES=/d' arch/arm64/configs/mt6853-ss_defconfig
-        sed -i '/CONFIG_KPROBE_EVENTS=/d' arch/arm64/configs/mt6853-ss_defconfig
-        sed -i '/CONFIG_HAVE_KPROBES=/d' arch/arm64/configs/mt6853-ss_defconfig
+        # 也写到 defconfig 文件（永久）
+        echo "CONFIG_KSU=y" >> arch/arm64/configs/mt6853-ss_defconfig
+        echo "CONFIG_KSU_MANUAL_HOOK=y" >> arch/arm64/configs/mt6853-ss_defconfig
+        echo "CONFIG_KSU_USE_KPROBES=n" >> arch/arm64/configs/mt6853-ss_defconfig
 
-        echo "CONFIG_KPROBES=n" >> arch/arm64/configs/mt6853-ss_defconfig
-        echo "CONFIG_KPROBE_EVENTS=n" >> arch/arm64/configs/mt6853-ss_defconfig
-        echo "CONFIG_HAVE_KPROBES=n" >> arch/arm64/configs/mt6853-ss_defconfig
-
-        # 打印 KSU 相关 config 到 artifact 文件（调试用）
-        grep -i "ksu\|ksu_" out/.config > $GITHUB_WORKSPACE/ksu_config.txt || echo "No KSU config found" > $GITHUB_WORKSPACE/ksu_config.txt
+        # 打印 KSU config 调试
+        grep -i "ksu" out/.config > $GITHUB_WORKSPACE/ksu_config.txt || echo "No KSU config" > $GITHUB_WORKSPACE/ksu_config.txt
 
         make O=out savedefconfig
         cp out/defconfig arch/arm64/configs/mt6853-ss_defconfig
