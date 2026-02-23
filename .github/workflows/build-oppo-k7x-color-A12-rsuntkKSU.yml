@@ -52,15 +52,19 @@ jobs:
         if [ -d "drivers/kernelsu" ]; then rm -rf drivers/kernelsu; fi
         git clone --depth=1 https://github.com/rsuntk/KernelSU drivers/kernelsu -b main
 
-        # 进入 KSU 目录
-        cd drivers/kernelsu/kernel
+        # 检查 clone 是否成功
+        ls drivers/kernelsu/kernel || echo "Clone failed, no kernel dir"
 
-        # 手动加 Kconfig 到 drivers/Kconfig
-        cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel/drivers
-        grep -q "source \"kernelsu/Kconfig\"" Kconfig || echo 'source "kernelsu/Kconfig"' >> Kconfig
+        # 进入 drivers 目录加 Kconfig
+        cd drivers
+        # 修正 source 路径为 kernelsu/kernel/Kconfig
+        grep -q "source \"kernelsu/kernel/Kconfig\"" Kconfig || echo 'source "kernelsu/kernel/Kconfig"' >> Kconfig
 
-        # 手动加 Makefile
+        # 加 Makefile
         grep -q "obj-\$(CONFIG_KSU)" Makefile || echo "obj-\$(CONFIG_KSU) += kernelsu/" >> Makefile
+
+        # 检查 Kconfig 是否加成功
+        tail -n 5 Kconfig > $GITHUB_WORKSPACE/kconfig_tail.txt
 
         # 回到根目录
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
