@@ -144,12 +144,14 @@ jobs:
       with:
         name: mtk6853-Image.gz
         path: kernel_workspace/android-kernel/out/arch/arm64/boot/Image.gz
-
-    - name: 上传编译日志 & KSU config（调试用）
+        
+    - name: 上传编译日志 & KSU 调试文件
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: build-log-and-ksu-config
+        name: build-log-and-ksu-debug
         path: |
           kernel_workspace/android-kernel/build.log
           kernel_workspace/ksu_config.txt
+          kernel_workspace/kconfig_tail.txt
+          kernel_workspace/clone_check.txt
