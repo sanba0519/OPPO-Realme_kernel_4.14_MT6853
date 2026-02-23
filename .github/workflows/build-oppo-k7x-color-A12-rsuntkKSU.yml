@@ -4,7 +4,7 @@ on:
   push:
   workflow_dispatch:
   schedule:
-    - cron: '0 0 * * 5'  # 每周五凌晨运行
+    - cron: '0 0 * * 5'
 
 jobs:
   build:
@@ -46,29 +46,37 @@ jobs:
         git clone --depth=1 https://github.com/sanba0519/android_kernel_4.14_MT6853 android-kernel
         cd android-kernel
 
-    - name: 手动集成 rsuntk KernelSU（绕过 setup.sh 问题）
+    - name: 手动集成 rsuntk KernelSU
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
-        if [ -d "drivers/kernelsu" ]; then rm -rf drivers/kernelsu; fi
+        rm -rf drivers/kernelsu
         git clone --depth=1 https://github.com/rsuntk/KernelSU drivers/kernelsu -b main
 
-        # 检查 clone 是否成功（看有没有 kernel/Kconfig）
-        ls drivers/kernelsu/kernel/Kconfig || echo "Clone failed or no kernel/Kconfig" > $GITHUB_WORKSPACE/clone_check.txt
-
-        # 加 Kconfig 到 drivers/Kconfig（正确路径：kernelsu/kernel/Kconfig）
         cd drivers
-        grep -q "source \"kernelsu/kernel/Kconfig\"" Kconfig || echo 'source "kernelsu/kernel/Kconfig"' >> Kconfig
+        echo 'source "kernelsu/kernel/Kconfig"' >> Kconfig
+        echo "obj-\$(CONFIG_KSU) += kernelsu/kernel/" >> Makefile
 
-        # 加 Makefile（正确路径：kernelsu/kernel/Makefile）
-        grep -q "obj-\$(CONFIG_KSU)" Makefile || echo "obj-\$(CONFIG_KSU) += kernelsu/" >> Makefile
+        tail -n 5 Kconfig > $GITHUB_WORKSPACE/kconfig_tail.txt
+        ls -l kernelsu/kernel > $GITHUB_WORKSPACE/ksu_dir_check.txt
 
-        # 调试输出 Kconfig 最后几行
-        tail -n 10 Kconfig > $GITHUB_WORKSPACE/kconfig_tail.txt
+    - name: 注入 Minimalist Hooks (手动钩子)
+      run: |
+        cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
 
-        # 调试输出 clone_check
-        cat $GITHUB_WORKSPACE/clone_check.txt || echo "No clone check file" > $GITHUB_WORKSPACE/clone_check.txt
+        # 给 fs/open.c 打钩子
+        sed -i '/long do_sys_open(int dfd, const char __user \*filename, int flags, umode_t mode)/a \
+        extern int ksu_handle_faccessat(int *dfd, const char __user **filename, int *mode, int *flags);\
+        ksu_handle_faccessat(&dfd, &filename, &mode, &flags);' fs/open.c
 
-    - name: 重新生成 defconfig + 强制开启 KSU 和 manual hook
+        # 给 fs/exec.c 打钩子（补全截断部分）
+        sed -i '/int search_binary_handler(struct linux_binprm \*bprm, struct pt_regs \*regs)/a \
+        extern int ksu_handle_execveat(int *fd, struct filename **filename, void *argv, void *envp, int *flags);\
+        ksu_handle_execveat(&bprm->fd, &bprm->filename, &bprm->argc, &bprm->envp, &bprm->flags);' fs/exec.c
+
+        # 调试输出是否打成功
+        grep -i ksu_handle fs/open.c fs/exec.c > $GITHUB_WORKSPACE/hook_check.txt || echo "Hook not applied" > $GITHUB_WORKSPACE/hook_check.txt
+
+    - name: 配置内核并开启 KSU
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
         export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang-aosp/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc64/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc32/bin:$PATH
@@ -76,24 +84,15 @@ jobs:
         export SUBARCH=arm64
 
         rm -rf out/
-
         make O=out mt6853-ss_defconfig
 
-        # 强制开启 KSU 和最小化钩子
         scripts/config --file out/.config --enable KSU
         scripts/config --file out/.config --enable KSU_MANUAL_HOOK
         scripts/config --file out/.config --disable KSU_USE_KPROBES
 
-        # 写到 defconfig
-        echo "CONFIG_KSU=y" >> arch/arm64/configs/mt6853-ss_defconfig
-        echo "CONFIG_KSU_MANUAL_HOOK=y" >> arch/arm64/configs/mt6853-ss_defconfig
-        echo "CONFIG_KSU_USE_KPROBES=n" >> arch/arm64/configs/mt6853-ss_defconfig
+        make O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-android- olddefconfig
 
-        # 打印 KSU config 调试
-        grep -i "ksu" out/.config > $GITHUB_WORKSPACE/ksu_config.txt || echo "No KSU config found" > $GITHUB_WORKSPACE/ksu_config.txt
-
-        make O=out savedefconfig
-        cp out/defconfig arch/arm64/configs/mt6853-ss_defconfig
+        grep -i ksu out/.config > $GITHUB_WORKSPACE/ksu_config.txt || echo "No KSU config found" > $GITHUB_WORKSPACE/ksu_config.txt
 
     - name: 设置 ccache 加速编译
       uses: hendrikmuhs/ccache-action@v1.2
@@ -128,7 +127,6 @@ jobs:
         sed -i 's!block=/dev/block/platform/omap/omap_hsmmc.0/by-name/boot;!block=/dev/block/by-name/boot;!g' anykernel.sh
         sed -i 's/is_slot_device=0;/is_slot_device=auto;/g' anykernel.sh
 
-        # 强制 permissive（从 cmdline 覆盖）
         echo 'cmdline+=" androidboot.selinux=permissive"' >> anykernel.sh
 
         cp ../android-kernel/out/arch/arm64/boot/Image.gz-dtb Image.gz-dtb
@@ -148,7 +146,7 @@ jobs:
         name: mtk6853-Image.gz
         path: kernel_workspace/android-kernel/out/arch/arm64/boot/Image.gz
 
-    - name: 上传编译日志 & KSU 调试文件
+    - name: 上传日志 & 调试文件
       if: always()
       uses: actions/upload-artifact@v4
       with:
@@ -157,4 +155,6 @@ jobs:
           kernel_workspace/android-kernel/build.log
           kernel_workspace/ksu_config.txt
           kernel_workspace/kconfig_tail.txt
+          kernel_workspace/hook_check.txt
+          kernel_workspace/ksu_dir_check.txt
           kernel_workspace/clone_check.txt
