@@ -52,18 +52,21 @@ jobs:
         if [ -d "drivers/kernelsu" ]; then rm -rf drivers/kernelsu; fi
         git clone --depth=1 https://github.com/rsuntk/KernelSU drivers/kernelsu -b main
 
-        # 检查 clone 是否成功（看有没有 Kconfig 文件）
-        ls drivers/kernelsu/Kconfig || echo "Clone failed or no Kconfig in root" > $GITHUB_WORKSPACE/clone_check.txt
+        # 检查 clone 是否成功（看有没有 kernel/Kconfig）
+        ls drivers/kernelsu/kernel/Kconfig || echo "Clone failed or no kernel/Kconfig" > $GITHUB_WORKSPACE/clone_check.txt
 
-        # 加 Kconfig 到 drivers/Kconfig（修正为 kernelsu/Kconfig）
+        # 加 Kconfig 到 drivers/Kconfig（正确路径：kernelsu/kernel/Kconfig）
         cd drivers
-        grep -q "source \"kernelsu/Kconfig\"" Kconfig || echo 'source "kernelsu/Kconfig"' >> Kconfig
+        grep -q "source \"kernelsu/kernel/Kconfig\"" Kconfig || echo 'source "kernelsu/kernel/Kconfig"' >> Kconfig
 
-        # 加 Makefile
+        # 加 Makefile（正确路径：kernelsu/kernel/Makefile）
         grep -q "obj-\$(CONFIG_KSU)" Makefile || echo "obj-\$(CONFIG_KSU) += kernelsu/" >> Makefile
 
         # 调试输出 Kconfig 最后几行
         tail -n 10 Kconfig > $GITHUB_WORKSPACE/kconfig_tail.txt
+
+        # 调试输出 clone_check
+        cat $GITHUB_WORKSPACE/clone_check.txt || echo "No clone check file" > $GITHUB_WORKSPACE/clone_check.txt
 
     - name: 重新生成 defconfig + 强制开启 KSU 和 manual hook
       run: |
