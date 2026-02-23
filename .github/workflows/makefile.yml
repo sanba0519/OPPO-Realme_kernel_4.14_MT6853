@@ -75,7 +75,7 @@ jobs:
         export KBUILD_BUILD_USER=SanBa
         
         # 第一步：把名字塞进配置文件（保持这一行）
-        make -s O=out ARCH=arm64 mt6853-ss_defconfig LOCALVERSION="-酷安-三笆-GitHub-@sanba0519"
+        make -s O=out ARCH=arm64 mt6853-ss_defconfig
         
         # 第二步：正式编译（删掉末尾重复的 LOCALVERSION 参数！！）
         make -j$(nproc --all) CC="ccache clang" O=out ARCH=arm64 \
