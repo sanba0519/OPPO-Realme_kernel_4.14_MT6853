@@ -46,54 +46,69 @@ jobs:
         git clone --depth=1 https://github.com/sanba0519/android_kernel_4.14_MT6853 android-kernel
         cd android-kernel
 
-    - name: 手动集成 rsuntk KernelSU
+    - name: 手动集成 rsuntk KernelSU + 清理编码
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
         
-        # 1. 清理环境：删除旧目录，移除 drivers/Kconfig 和 Makefile 中可能存在的旧 KSU 引用
+        # 1. 清理旧 KSU
         rm -rf drivers/kernelsu
-        sed -i '/kernelsu/d' drivers/Kconfig
-        sed -i '/kernelsu/d' drivers/Makefile
         
-        # 2. 克隆 RKSU
+        # 2. 克隆最新
         git clone --depth=1 https://github.com/rsuntk/KernelSU drivers/kernelsu -b main
-
-        # 3. 写入正确的引用路径 (基于 rsuntk 的仓库结构)
-        # 注意：rsuntk 的 Kconfig 实际在 drivers/kernelsu/kernel/Kconfig
-        echo 'source "drivers/kernelsu/kernel/Kconfig"' >> drivers/Kconfig
-        echo "obj-\$(CONFIG_KSU) += kernelsu/kernel/" >> drivers/Makefile
-
-        # 4. 解决 Oppo 源码的编码问题 (dos2unix)
-        find drivers/soc/oplus -name "Kconfig*" -exec dos2unix {} +
-        find drivers/nfc -name "Kconfig*" -exec dos2unix {} +
+        
+        # 3. 清理 Oppo Kconfig 编码问题（CRLF / 不可见字符）
+        find drivers/soc/oplus -name "Kconfig*" -exec dos2unix {} \;
+        find drivers/nfc -name "Kconfig*" -exec dos2unix {} \;
+        
+        # 4. 加 Kconfig 引用（rsuntk Kconfig 在 kernelsu/kernel/Kconfig）
+        cd drivers
+        sed -i '/endmenu/i source "kernelsu/kernel/Kconfig"' Kconfig
+        
+        # 5. 加 Makefile 引用
+        echo "obj-\$(CONFIG_KSU) += kernelsu/kernel/" >> Makefile
+        
+        # 调试输出
+        tail -n 10 Kconfig > $GITHUB_WORKSPACE/kconfig_tail.txt
+        ls -l kernelsu/kernel > $GITHUB_WORKSPACE/ksu_dir_check.txt
 
     - name: 注入 Minimalist Hooks (手动钩子)
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
         
-        # 这里的 sed 使用了更稳健的匹配方式
-        # 修改 fs/open.c
-        sed -i '/do_sys_open(int/a \extern int ksu_handle_faccessat(int *dfd, const char __user **filename, int *mode, int *flags);\nksu_handle_faccessat(&dfd, &filename, &mode, &flags);' fs/open.c
-
-        # 修改 fs/exec.c
-        sed -i '/search_binary_handler(struct/a \extern int ksu_handle_execveat(int *fd, struct filename **filename, void *argv, void *envp, int *flags);\nksu_handle_execveat(&bprm->fd, &bprm->filename, &bprm->argc, &bprm->envp, &bprm->flags);' fs/exec.c
+        # fs/open.c - 在 do_sys_open 函数体开头插入
+        sed -i '/long do_sys_open(/a \
+        extern int ksu_handle_faccessat(int *dfd, const char __user **filename, int *mode, int *flags);\
+        ksu_handle_faccessat(&dfd, &filename, &mode, &flags);' fs/open.c
+        
+        # fs/exec.c - 在 search_binary_handler 函数体开头插入
+        sed -i '/int search_binary_handler(/a \
+        extern int ksu_handle_execveat(int *fd, struct filename **filename, void *argv, void *envp, int *flags);\
+        ksu_handle_execveat(&bprm->fd, &bprm->filename, &bprm->argc, &bprm->envp, &bprm->flags);' fs/exec.c
+        
+        # 调试检查 hook 是否插入成功
+        grep -A 5 ksu_handle fs/open.c > $GITHUB_WORKSPACE/hook_open.txt
+        grep -A 5 ksu_handle fs/exec.c > $GITHUB_WORKSPACE/hook_exec.txt
 
     - name: 配置内核并开启 KSU
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
         export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang-aosp/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc64/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc32/bin:$PATH
         export ARCH=arm64
-        
+        export SUBARCH=arm64
+
+        rm -rf out/
         make O=out mt6853-ss_defconfig
-        
-        # 强制写入 .config
-        ./scripts/config --file out/.config -e CONFIG_KSU
-        ./scripts/config --file out/.config -e CONFIG_KSU_MANUAL_HOOK
-        ./scripts/config --file out/.config -d CONFIG_KSU_USE_KPROBES
-        
-        # 关键：同步配置并检查是否存在
+
+        # 强制开启 KSU 配置
+        scripts/config --file out/.config --enable KSU
+        scripts/config --file out/.config --enable KSU_MANUAL_HOOK
+        scripts/config --file out/.config --disable KSU_USE_KPROBES
+
+        # 刷新配置（解决 Oppo 脏 Kconfig 丢失问题）
         make O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-android- olddefconfig
-        grep "CONFIG_KSU" out/.config
+
+        # 调试输出 config
+        grep -i ksu out/.config > $GITHUB_WORKSPACE/ksu_config.txt || echo "No KSU config found" > $GITHUB_WORKSPACE/ksu_config.txt
 
     - name: 设置 ccache 加速编译
       uses: hendrikmuhs/ccache-action@v1.2
@@ -156,6 +171,7 @@ jobs:
           kernel_workspace/android-kernel/build.log
           kernel_workspace/ksu_config.txt
           kernel_workspace/kconfig_tail.txt
-          kernel_workspace/hook_check.txt
+          kernel_workspace/hook_open.txt
+          kernel_workspace/hook_exec.txt
           kernel_workspace/ksu_dir_check.txt
           kernel_workspace/clone_check.txt
