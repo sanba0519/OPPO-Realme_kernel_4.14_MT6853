@@ -33,10 +33,11 @@ Build OppoK7x (PERM00) (Color A12)（MT6853）是集成了SukiSU　~~但是不�
 
 ~你可以通过关注[TG频道](https://t.me/oppok7x)来关注开发者动态~
 ***
-2026.02.21 
 
-实在不知道为啥 刷入后sukisu不显示运行中 原作者已弃坑 接下来交给[@Eridian1628](https://github.com/Eridian1628)接手 
+~~实在不知道为啥 刷入后sukisu不显示运行中 原作者已弃坑 接下来交给[@Eridian1628](https://github.com/Eridian1628)接手~~~
 
-`后会有期`
+~~`后会有期`~~
 
-  by @sanba0519
+###
+
+已集成[RKSU](https://github.com/rsuntk/KernelSU) 可见另一个仓库（也是我的）https://github.com/Eridian1628/kernel_mtk6853_RKSU
