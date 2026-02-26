@@ -40,4 +40,4 @@ Build OppoK7x (PERM00) (Color A12)（MT6853）是集成了SukiSU　~~但是不�
 
 ###
 
-已集成[RKSU](https://github.com/rsuntk/KernelSU) 可见另一个仓库（也是我的）https://github.com/Eridian1628/kernel_mtk6853_RKSU
+已集成[RKSU](https://github.com/rsuntk/KernelSU) 源码可见另一个仓库（也是我的）https://github.com/Eridian1628/kernel_mtk6853_RKSU
