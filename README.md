@@ -13,7 +13,9 @@
 
 ***
 
-注意！！！ 别用此项目构建内核 见另一个仓库（也是我写的代码）https://github.com/Eridian1628/kernel_mtk6853_RKSU
+### 注意！！！ 如果你想用一个可以正常使用ROOT的内核 请别用此项目构建内核 见另一个仓库（也是我写的代码）https://github.com/Eridian1628/kernel_mtk6853_RKSU
+
+***
 
 如何构建？
 
@@ -32,10 +34,8 @@ Build OppoK7x (PERM00) (Color A12)（MT6853）是集成了SukiSU　~~但是不�
 ~~enjoy it!~~
 
 ###
-尚未开发完全 敬请期待
+~~尚未开发完全 敬请期待~~
 
-你可以通过关注[TG频道](https://t.me/oppok7x)来关注开发者动态
-***
 
 ~~实在不知道为啥 刷入后sukisu不显示运行中 原作者已弃坑 接下来交给[@Eridian1628](https://github.com/Eridian1628)接手~~
 
