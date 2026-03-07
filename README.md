@@ -13,9 +13,7 @@
 
 ***
 
-### 注意！！！ 如果你想用一个可以正常使用ROOT的内核 请别用此项目构建内核 见另一个仓库（也是我写的代码）https://github.com/Eridian1628/kernel_mtk6853_RKSU
 
-***
 
 ### 如何构建？
 
@@ -41,5 +39,3 @@
 
 ~~`后会有期`~~
 
-***
-### 已集成[RKSU](https://github.com/rsuntk/KernelSU) 源码可见另一个仓库（也是我的）https://github.com/Eridian1628/kernel_mtk6853_RKSU
