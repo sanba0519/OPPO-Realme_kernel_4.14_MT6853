@@ -1,4 +1,4 @@
-name: Build SukiSU OppoK7x (PERM00) (Color A12)（MT6853）
+name: Build MT6853 Kernel-SukiSU (A12)
 
 on:
   push:
