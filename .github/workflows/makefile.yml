@@ -2,7 +2,6 @@ name: 编译OPPO/Realme-安卓12-通用mt6853机型内核
             支持ksu docker lxc kvm Kali-Nethunter
 
 on:
-  push:
   workflow_dispatch:
     
 jobs:
