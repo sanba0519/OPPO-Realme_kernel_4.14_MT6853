@@ -1,6 +1,7 @@
-name: Build(rsuntk KSU legacy + Hooks) Oppo K7x MT6853
+name: RKSU for MT6853
 
 on:
+  push:
   workflow_dispatch:
     inputs:
       BBR:
@@ -9,105 +10,51 @@ on:
         required: false
         default: false
 
+    
 jobs:
   build:
+
     runs-on: ubuntu-22.04
 
     steps:
-    - name: 检出仓库
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
 
     - name: 构建编译内核环境
       run: |
-        sudo apt-get update -qq
-        sudo apt-get install -y --no-install-recommends \
-          git make bc bison ccache openssl dos2unix zip unzip kmod cpio flex \
-          libelf-dev curl libssl-dev libtfm-dev wget device-tree-compiler ca-certificates \
-          python3 python-is-python3 binutils binutils-aarch64-linux-gnu \
-          binutils-arm-linux-gnueabi gcc-multilib g++-multilib libc6-dev-i386 \
-          libncurses5 libncursesw5-dev rsync patch
+        sudo apt-get update
+        sudo -E apt-get -y -qq install git make bc bison ccache openssl dos2unix zip kmod cpio flex libelf-dev curl libssl-dev libtfm-dev wget device-tree-compiler ca-certificates python3 python2 binutils binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi
+        mkdir -p $GITHUB_WORKSPACE/kernel_workspace
 
-    - name: 下载 GCC 工具链 (Google 4.9)
-      run: |
-        mkdir -p $GITHUB_WORKSPACE/kernel_workspace && cd $GITHUB_WORKSPACE/kernel_workspace
-        mkdir -p gcc64 gcc32
-        wget -qO gcc-aarch64.tar.gz https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/tags/android-12.1.0_r27.tar.gz
-        tar -xzf gcc-aarch64.tar.gz -C gcc64/
-        wget -qO gcc-arm.tar.gz https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/+archive/refs/tags/android-12.1.0_r27.tar.gz
-        tar -xzf gcc-arm.tar.gz -C gcc32/
-
-    - name: 下载 Clang 工具链 (crDroid clang-10)
+    - name: 下载 Gcc编译器
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace
-        git clone --depth=1 https://github.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-6443078 -b 10.0 clang-aosp
-
+        
+        mkdir gcc64
+        wget -O gcc-aarch64.tar.gz https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/tags/android-12.1.0_r27.tar.gz
+        tar -C gcc64/ -zxvf gcc-aarch64.tar.gz
+    
+        mkdir gcc32
+        wget -O gcc-arm.tar.gz https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/+archive/refs/tags/android-12.1.0_r27.tar.gz
+        tar -C gcc32/ -zxvf gcc-arm.tar.gz
+    
+    - name: 下载Clang编译器
+      run: |
+        cd $GITHUB_WORKSPACE/kernel_workspace
+        mkdir clang-aosp
+        git clone -q --depth=1 https://github.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-6443078 -b 10.0 clang-aosp
+    
+    
     - name: 下载内核源码
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace
-        git clone --depth=1 https://github.com/sanba0519/android_kernel_4.14_MT6853 android-kernel
+        git clone -b RKSU --single-branch https://github.com/sanba0519/android_kernel_4.14_MT6853.git android-kernel
+        cd android-kernel
 
-    - name: 集成 rsuntk KernelSU 并注入钩子
+    - name: 打patch
       run: |
-        cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
-        
-        # 1. 彻底清理
-        rm -rf drivers/ksu_core KernelSU_Tmp
-        sed -i '/ksu_core/d;/KSU/d' drivers/Kconfig drivers/Makefile || true
-        
-        # 2. 克隆 Legacy 分支
-        git clone --depth=1 https://github.com/rsuntk/KernelSU KernelSU_Tmp -b v3.0.0-30-legacy || { echo "克隆失败"; exit 1; }
-        
-        # 3. 地毯式搜索 Kconfig 并拷贝整个源码目录
-        mkdir -p drivers/ksu_core
-        KCONFIG_FILE=$(find KernelSU_Tmp -type f -name "Kconfig" | head -n 1)
-        if [ -z "$KCONFIG_FILE" ]; then
-          echo "ERROR: 仓库中找不到任何 Kconfig 文件！"
-          ls -R KernelSU_Tmp | head -n 20
-          exit 1
-        fi
-        
-        KSU_SOURCE_DIR=$(dirname "$KCONFIG_FILE")
-        echo "发现 KSU 源码目录：$KSU_SOURCE_DIR"
-        cp -rf "$KSU_SOURCE_DIR"/* drivers/ksu_core/ || { echo "拷贝失败"; exit 1; }
-        chmod -R +w drivers/ksu_core
-        rm -rf KernelSU_Tmp
-        
-        # 4. 检查拷贝结果
-        echo "=== 拷贝结果检查 ==="
-        ls -l drivers/ksu_core/Kconfig drivers/ksu_core/Makefile drivers/ksu_core/*.c || { echo "Kconfig 或源文件缺失！"; exit 1; }
-        
-        # 5. 自动检测前缀
-        cd drivers/ksu_core
-        if grep -q -e "rksu_handle_execveat" -e "rksu_handle_" *.c *.h 2>/dev/null; then
-          KSU_PREFIX="rksu"
-        elif grep -q -e "ksu_handle_execveat" -e "ksu_handle_" *.c *.h 2>/dev/null; then
-          KSU_PREFIX="ksu"
-        else
-          KSU_PREFIX="ksu"
-          echo "WARNING: 未检测到前缀，使用默认 ksu_"
-        fi
-        cd ../../
-        echo "检测到的 KSU 前缀：${KSU_PREFIX}_handle_"
-        
-        # 6. 重写 Makefile
-        if [ -f "drivers/ksu_core/kernelsu.c" ]; then
-          echo "obj-y += kernelsu.o" > drivers/ksu_core/Makefile
-        else
-          echo "obj-y += ksu.o" > drivers/ksu_core/Makefile
-        fi
-        echo "ccflags-y += -I\$(srctree)/drivers/ksu_core" >> drivers/ksu_core/Makefile
-        
-        # 7. 注入顶级构建系统
-        sed -i '1i source "drivers/ksu_core/Kconfig"' drivers/Kconfig
-        sed -i '1i obj-y += ksu_core/' drivers/Makefile
-        
-        # 8. 清理编码 + 旧痕迹（全局清理一次）
-        find drivers/ksu_core -type f -exec dos2unix {} \; || true
-        sed -i "/${KSU_PREFIX}_handle/d;/ksu_handle/d;/rksu_handle/d;/KSU/d" fs/*.c kernel/*.c || true
-
-        # 9. 直接使用 RKSU 官方 patch 注入
-
         echo "KSU_LOG: 开始下载并应用 RKSU 官方 4.14 patch"
+        
+        cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
 
         # 下载官方 patch
         wget https://github.com/rksuorg/kernel_patches/raw/master/manual_hook/kernel-4.14.patch -O ksu-4.14.patch || { echo "下载 patch 失败"; exit 1; }
@@ -115,39 +62,29 @@ jobs:
         # 应用 patch（-p1 是标准，忽略空格差异）
         patch -p1 < ksu-4.14.patch || { echo "patch 应用失败"; cat ksu-4.14.patch; exit 1; }
 
-        # 清理下载的文件（可选）
-        rm -f ksu-4.14.patch
 
-        echo "KSU_LOG: 官方 patch 应用成功，检查关键文件是否修改"
-        git diff --stat fs/open.c fs/exec.c fs/stat.c fs/read_write.c kernel/reboot.c || echo "无变化？可能源码已包含补丁"
-    - name: 设置 ccache
+    - name: 更新 ksu
+      run: |
+        cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
+        rm -rf KernelSU
+        curl -LSs "https://raw.githubusercontent.com/rsuntk/KernelSU/main/kernel/setup.sh" | bash -s main
+               
+    - name: 设置ccache缓存
       uses: hendrikmuhs/ccache-action@v1.2
       with:
-        key: mtk6853-ksu-v3-legacy
+        key: build-kernel-mido-kernel
         max-size: 3G
 
-    - name: 配置内核并开启 KSU
+ 
+    - name: 配置环境并编译内核
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
         export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang-aosp/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc64/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc32/bin:$PATH
         export ARCH=arm64
         export SUBARCH=arm64
 
-        make O=out mt6853-ss_defconfig
-        
-        # 开启 KSU
-        ./scripts/config --file out/.config \
-          --enable CONFIG_KSU \
-          --enable CONFIG_KSU_MANUAL_HOOK \
-          --enable CONFIG_MODULES \
-          --disable CONFIG_KSU_USE_KPROBES \
-          --disable CONFIG_KPROBES \
-          --disable CONFIG_KPROBE_EVENTS \
-          --disable CONFIG_HAVE_KPROBES
-
-        make O=out olddefconfig
-
-        if [ "${{ github.event.inputs.BBR }}" = "true" ]; then 
+        # 添加BBR
+        if [ "${{ github.event.inputs.BBR }}" = "true" ]; then
           echo "启用 BBR..."
           ./scripts/config --file out/.config \
             --enable CONFIG_TCP_CONG_BBR \
@@ -157,46 +94,27 @@ jobs:
           echo "不启用 BBR..."
         fi
 
-    - name: 开始编译内核
-      run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
         export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang-aosp/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc64/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc32/bin:$PATH
-        export ARCH=arm64
-        export SUBARCH=arm64
         export KBUILD_BUILD_HOST=coolapk@sanba
         export KBUILD_BUILD_USER=GitHub@sanba0519
-
-        make -j$(nproc --all) O=out \
-          CC="ccache clang" \
-          CLANG_TRIPLE=aarch64-linux-gnu- \
-          CROSS_COMPILE=aarch64-linux-android- \
-          CROSS_COMPILE_ARM32=arm-linux-androideabi- \
-          LD=ld.lld \
-          Image.gz-dtb 2>&1 | tee build.log || { tail -n 100 build.log; exit 1; }
-
-    - name: 制作 AnyKernel3 卡刷包
+        make -s -j$(nproc --all) O=out ARCH=arm64 mt6853-ss_defconfig
+        make -j$(nproc --all) CC="ccache clang" O=out ARCH=arm64 CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-android- CROSS_COMPILE_ARM32=arm-linux-androideabi- LD=ld.lld
+                
+    - name: 制作Anykernel3卡刷包
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace
-        git clone --depth=1 https://github.com/sanba0519/AnyKernel3
-        cd AnyKernel3
-        sed -i 's|block=/dev/block/platform/omap/omap_hsmmc.0/by-name/boot;|block=/dev/block/by-name/boot;|g' anykernel.sh
-        sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel.sh
-        sed -i 's/is_slot_device=0;/is_slot_device=0;/g' anykernel.sh
-        sed -i '/cmdline=/a cmdline="androidboot.selinux=permissive"' anykernel.sh
+        git clone https://github.com/sanba0519/AnyKernel3
+        sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel3/anykernel.sh
+        sed -i 's!block=/dev/block/platform/omap/omap_hsmmc.0/by-name/boot;!block=auto;!g' AnyKernel3/anykernel.sh
+        sed -i 's/is_slot_device=0;/is_slot_device=auto;/g' AnyKernel3/anykernel.sh
+        cp android-kernel/out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
+        rm -rf AnyKernel3/.git* AnyKernel3/README.md
         
-        if [ -f "../android-kernel/out/arch/arm64/boot/Image.gz-dtb" ]; then
-            cp ../android-kernel/out/arch/arm64/boot/Image.gz-dtb Image.gz-dtb
-        elif [ -f "../android-kernel/out/arch/arm64/boot/Image.gz" ]; then
-            cp ../android-kernel/out/arch/arm64/boot/Image.gz Image.gz
-        else
-            echo "ERROR: Kernel image not found!"
-            exit 1
-        fi
-        rm -rf .git* README.md .github
-
+    
+    
     - name: 上传 AnyKernel3 卡刷包
       uses: actions/upload-artifact@v4
       with:
-        name: OPPO-K7x-MT6853-KSU-AnyKernel3
+        name: MT6853-RKSU-AnyKernel3
         path: kernel_workspace/AnyKernel3/*
-        
