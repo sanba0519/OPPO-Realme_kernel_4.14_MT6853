@@ -1,7 +1,6 @@
 name: RKSU for MT6853
 
 on:
-  push:
   workflow_dispatch:
     inputs:
       BBR:
