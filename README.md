@@ -12,8 +12,7 @@
 >务必升级到安卓12再刷入此内核
 
 TO DO:
-~~- [ ] 可以给RKSU的[patch](https://github.com/rksuorg/kernel_patches)交个PR（？ ReSukiSU的[hook](https://resukisu.github.io/zh-Hans/guide/manual-integrate.html)  backslashxx的[hook](https://github.com/backslashxx/KernelSU/issues/5)~~
-- [ ] 适配最新版[RKSU](https://github.com/rsuntk/KernelSU)
+- [x] 适配最新版[RKSU](https://github.com/rsuntk/KernelSU)
 - [ ] 内置[Re:SukiSU](https://github.com/ReSukiSU/ReSukiSU)
 - [ ] 开放创意工坊
      - [x] BBR加速
