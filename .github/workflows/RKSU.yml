@@ -58,11 +58,12 @@ jobs:
         # 下载官方 patch
         wget https://github.com/rksuorg/kernel_patches/raw/master/manual_hook/kernel-4.14.patch -O ksu-4.14.patch || { echo "下载 patch 失败"; exit 1; }
 
-        # 应用 patch（-p1 是标准，忽略空格差异）
+        # 应用 patch
         patch -p1 < ksu-4.14.patch || { echo "patch 应用失败"; cat ksu-4.14.patch; exit 1; }
+        echo "KSU_LOG: patch 应用成功"
 
 
-    - name: 更新 ksu
+    - name: 集成 RKSU
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
         rm -rf KernelSU
@@ -82,7 +83,9 @@ jobs:
         export ARCH=arm64
         export SUBARCH=arm64
 
-        # 添加BBR
+        make O=out mt6853-ss_defconfig
+
+        # 启用BBR
         if [ "${{ github.event.inputs.BBR }}" = "true" ]; then
           echo "启用 BBR..."
           ./scripts/config --file out/.config \
