@@ -2,11 +2,10 @@
 /*
  * Copyright (C) 2018 HUAWEI, Inc.
  *             https://www.huawei.com/
- * Created by Gao Xiang <gaoxiang25@huawei.com>
  */
 #include "internal.h"
 #include <linux/pagevec.h>
-#include <linux/mm_inline.h>
+#include <linux/xarray.h>
 
 struct page *erofs_allocpage(struct list_head *pool, gfp_t gfp)
 {
@@ -55,7 +54,7 @@ struct erofs_workgroup *erofs_find_workgroup(struct super_block *sb,
 
 repeat:
 	rcu_read_lock();
-	grp = radix_tree_lookup(&sbi->workstn.tree, index);
+	grp = radix_tree_lookup(&sbi->workstn_tree, index);
 	if (grp) {
 		if (erofs_workgroup_get(grp)) {
 			/* prefer to relax rcu read side */
@@ -86,16 +85,16 @@ int erofs_register_workgroup(struct super_block *sb,
 		return err;
 
 	sbi = EROFS_SB(sb);
-	erofs_workstn_lock(sbi);
+	xa_lock(&sbi->workstn_tree);
 
 	/*
 	 * Bump up reference count before making this workgroup
 	 * visible to other users in order to avoid potential UAF
-	 * without serialized by erofs_workstn_lock.
+	 * without serialized by workstn_lock.
 	 */
 	__erofs_workgroup_get(grp);
 
-	err = radix_tree_insert(&sbi->workstn.tree, grp->index, grp);
+	err = radix_tree_insert(&sbi->workstn_tree, grp->index, grp);
 	if (err)
 		/*
 		 * it's safe to decrease since the workgroup isn't visible
@@ -103,7 +102,7 @@ int erofs_register_workgroup(struct super_block *sb,
 		 */
 		__erofs_workgroup_put(grp);
 
-	erofs_workstn_unlock(sbi);
+	xa_unlock(&sbi->workstn_tree);
 	radix_tree_preload_end();
 	return err;
 }
@@ -152,7 +151,7 @@ static bool erofs_try_to_release_workgroup(struct erofs_sb_info *sbi,
 	 * however in order to avoid some race conditions, add a
 	 * DBG_BUGON to observe this in advance.
 	 */
-	DBG_BUGON(radix_tree_delete(&sbi->workstn.tree, grp->index) != grp);
+	DBG_BUGON(radix_tree_delete(&sbi->workstn_tree, grp->index) != grp);
 
 	/* last refcount should be connected with its managed pslot.  */
 	erofs_workgroup_unfreeze(grp, 0);
@@ -169,9 +168,9 @@ static unsigned long erofs_shrink_workstation(struct erofs_sb_info *sbi,
 
 	int i, found;
 repeat:
-	erofs_workstn_lock(sbi);
+	xa_lock(&sbi->workstn_tree);
 
-	found = radix_tree_gang_lookup(&sbi->workstn.tree,
+	found = radix_tree_gang_lookup(&sbi->workstn_tree,
 				       batch, first_index, PAGEVEC_SIZE);
 
 	for (i = 0; i < found; ++i) {
@@ -187,7 +186,7 @@ repeat:
 		if (!--nr_shrink)
 			break;
 	}
-	erofs_workstn_unlock(sbi);
+	xa_unlock(&sbi->workstn_tree);
 
 	if (i && nr_shrink)
 		goto repeat;
@@ -303,4 +302,3 @@ void erofs_exit_shrinker(void)
 	unregister_shrinker(&erofs_shrinker_info);
 }
 #endif	/* !CONFIG_EROFS_FS_ZIP */
-

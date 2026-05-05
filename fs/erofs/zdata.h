@@ -2,11 +2,11 @@
 /*
  * Copyright (C) 2018 HUAWEI, Inc.
  *             https://www.huawei.com/
- * Created by Gao Xiang <gaoxiang25@huawei.com>
  */
 #ifndef __EROFS_FS_ZDATA_H
 #define __EROFS_FS_ZDATA_H
 
+#include <linux/kthread.h>
 #include "internal.h"
 #include "zpvec.h"
 
@@ -90,8 +90,9 @@ struct z_erofs_decompressqueue {
 	z_erofs_next_pcluster_t head;
 
 	union {
-		wait_queue_head_t wait;
+		struct completion done;
 		struct work_struct work;
+		struct kthread_work kthread_work;
 	} u;
 };
 

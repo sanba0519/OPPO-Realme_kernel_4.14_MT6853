@@ -2,7 +2,6 @@
 /*
  * Copyright (C) 2017-2018 HUAWEI, Inc.
  *             https://www.huawei.com/
- * Created by Gao Xiang <gaoxiang25@huawei.com>
  */
 #ifndef __EROFS_INTERNAL_H
 #define __EROFS_INTERNAL_H
@@ -61,10 +60,10 @@ struct erofs_sb_info {
 	struct mutex umount_mutex;
 
 	/* the dedicated workstation for compression */
-	struct {
-		struct radix_tree_root tree;
-		spinlock_t lock;
-	} workstn;
+	struct radix_tree_root workstn_tree;
+
+	/* strategy of sync decompression (false - auto, true - force on) */
+	bool readahead_sync_decompress;
 
 	/* threshold for decompression synchronously */
 	unsigned int max_sync_decompress_pages;
@@ -74,8 +73,6 @@ struct erofs_sb_info {
 
 	/* current strategy of how to use managed cache */
 	unsigned char cache_strategy;
-	/* strategy of sync decompression (false - auto, true - force on) */
-	bool readahead_sync_decompress;
 
 	/* pseudo inode to manage cached pages */
 	struct inode *managed_cache;
@@ -127,9 +124,6 @@ enum {
 };
 
 #define EROFS_LOCKED_MAGIC     (INT_MIN | 0xE0F510CCL)
-
-#define erofs_workstn_lock(sbi)         spin_lock(&(sbi)->workstn.lock)
-#define erofs_workstn_unlock(sbi)       spin_unlock(&(sbi)->workstn.lock)
 
 /* basic unit of the workstation of a super_block */
 struct erofs_workgroup {
@@ -252,7 +246,7 @@ struct erofs_inode {
 
 	unsigned char datalayout;
 	unsigned char inode_isize;
-	unsigned short xattr_isize;
+	unsigned int xattr_isize;
 
 	unsigned int xattr_shared_count;
 	unsigned int *xattr_shared_xattrs;
@@ -468,5 +462,8 @@ static inline int z_erofs_load_lz4_config(struct super_block *sb,
 
 #define EFSCORRUPTED    EUCLEAN         /* Filesystem is corrupted */
 
-#endif	/* __EROFS_INTERNAL_H */
+#ifndef lru_to_page
+#define lru_to_page(head) (list_entry((head)->prev, struct page, lru))
+#endif
 
+#endif	/* __EROFS_INTERNAL_H */

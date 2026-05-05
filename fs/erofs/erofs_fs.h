@@ -4,7 +4,6 @@
  *
  * Copyright (C) 2017-2018 HUAWEI, Inc.
  *             https://www.huawei.com/
- * Created by Gao Xiang <gaoxiang25@huawei.com>
  */
 #ifndef __EROFS_FS_H
 #define __EROFS_FS_H
@@ -336,12 +335,6 @@ enum {
 	EROFS_FT_MAX
 };
 
-/*
- * EROFS file types should match generic FT_* types and
- * it seems no need to add BUILD_BUG_ONs since potential
- * unmatchness will break other fses as well...
- */
-
 #define EROFS_NAME_LEN      255
 
 /* check the EROFS on-disk layout strictly at compile time */
@@ -361,4 +354,3 @@ static inline void erofs_check_ondisk_layout_definitions(void)
 }
 
 #endif
-
