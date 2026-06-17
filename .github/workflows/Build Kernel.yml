@@ -178,7 +178,7 @@ jobs:
         name: ${{steps.gen_name.outputs.artifact_name}}
         path: kernel_workspace/AnyKernel3/*
 
-    - name: Generate kernel update log
+    - name: Github Releases
       uses: softprops/action-gh-release@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
