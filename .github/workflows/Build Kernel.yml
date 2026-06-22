@@ -21,6 +21,7 @@ on:
         options:
           - main
           - bpf
+          - rebpf
 
     
 jobs:
