@@ -52,6 +52,7 @@
 #include <linux/atomic.h>
 #include <linux/cpuset.h>
 #include <linux/proc_ns.h>
+#include <linux/freezer.h>
 #include <linux/nsproxy.h>
 #include <linux/file.h>
 #include <linux/psi.h>
@@ -4533,6 +4534,93 @@ out_unlock:
 	return ret ?: nbytes;
 }
 
+/*
+ * cgroup v2 freezer support
+ */
+
+static int cgroup_freeze(struct cgroup *cgrp, bool freeze);
+
+static void cgroup_freeze_task(struct task_struct *task)
+{
+	mutex_lock(&task->sighand->siglock);
+	if (frozen(task) || (task->flags & PF_KTHREAD))
+		goto unlock;
+
+	freezer_do_not_count();
+	__refrigerator(true);
+	freezer_count();
+unlock:
+	mutex_unlock(&task->sighand->siglock);
+}
+
+static void cgroup_thaw_task(struct task_struct *task)
+{
+	mutex_lock(&task->sighand->siglock);
+	if (!frozen(task) || (task->flags & PF_KTHREAD))
+		goto unlock;
+
+	thaw_process(task);
+unlock:
+	mutex_unlock(&task->sighand->siglock);
+}
+
+static ssize_t cgroup_freeze_write(struct kernfs_open_file *of,
+				   char *buf, size_t nbytes, loff_t off)
+{
+	bool freeze;
+	int ret;
+
+	buf = strstrip(buf);
+	if (!strcmp(buf, "1")) {
+		freeze = true;
+	} else if (!strcmp(buf, "0")) {
+		freeze = false;
+	} else {
+		return -EINVAL;
+	}
+
+	mutex_lock(&cgroup_mutex);
+	ret = cgroup_freeze(of_css->cgroup, freeze);
+	mutex_unlock(&cgroup_mutex);
+
+	return ret ?: nbytes;
+}
+
+static ssize_t cgroup_freeze_show(struct kernfs_open_file *of,
+				  char *buf, size_t nbytes, loff_t off)
+{
+	struct cgroup *cgrp = of_css->cgroup;
+
+	return scnprintf(buf, nbytes, "%d\n", cgrp->freezer.freeze);
+}
+
+static int cgroup_freeze(struct cgroup *cgrp, bool freeze)
+{
+	struct cgroup *dsct;
+
+	lockdep_assert_held(&cgroup_mutex);
+
+	if (!cgroup_on_dfl(cgrp))
+		return -EINVAL;
+
+	cgrp->freezer.freeze = freeze;
+
+	cgroup_for_each_live_descendant_pre(dsct, NULL, cgrp) {
+		struct task_struct *task;
+
+		rcu_read_lock();
+		for_each_process_thread(task) {
+			if (freeze)
+				cgroup_freeze_task(task);
+			else
+				cgroup_thaw_task(task);
+		}
+		rcu_read_unlock();
+	}
+
+	return 0;
+}
+
 /* cgroup core interface files for the default hierarchy */
 static struct cftype cgroup_base_files[] = {
 	{
@@ -6019,133 +6107,3 @@ int cgroup_bpf_query(struct cgroup *cgrp, const union bpf_attr *attr,
 	return ret;
 }
 #endif /* CONFIG_CGROUP_BPF */
-
-/*
- * cgroup v2 freezer support
- *
- * The cgroup v2 freezer is a simplified version of the cgroup v1 freezer.
- * It provides freeze/thaw functionality for processes in a cgroup through
- * the "cgroup.freeze" file.
- */
-
-/**
- * cgroup_freeze_task - freeze a task
- * @task: task to freeze
- *
- * Freeze @task.  Must be called with cgroup_mutex held.
- */
-static void cgroup_freeze_task(struct task_struct *task)
-{
-	/*
-	 * Lock @task's siglock to serialize with
-	 * do_freezer_trap() and prevent frozen task from
-	 * escaping the frozen state through the freezer.
-	 */
-	mutex_lock(&task->signal->siglock);
-	if (frozen(task) || (task->flags & PF_KTHREAD))
-		goto unlock;
-
-	/* freeze the task */
-	freezer_do_not_count();
-	__refrigerator(true);
-	freezer_count();
-unlock:
-	mutex_unlock(&task->signal->siglock);
-}
-
-/**
- * cgroup_thaw_task - thaw a task
- * @task: task to thaw
- *
- * Thaw @task.  Must be called with cgroup_mutex held.
- */
-static void cgroup_thaw_task(struct task_struct *task)
-{
-	/*
-	 * Lock @task's siglock to serialize with
-	 * do_freezer_trap() and prevent frozen task from
-	 * escaping the frozen state through the freezer.
-	 */
-	mutex_lock(&task->signal->siglock);
-	if (!frozen(task) || (task->flags & PF_KTHREAD))
-		goto unlock;
-
-	/* thaw the task */
-	thaw_process(task);
-unlock:
-	mutex_unlock(&task->signal->siglock);
-}
-
-/**
- * cgroup_freeze - freeze or unfreeze a cgroup
- * @cgrp: target cgroup
- * @freeze: whether to freeze or unfreeze
- *
- * Freeze or unfreeze all tasks in @cgrp.  When @freeze is true, all tasks
- * in @cgrp are frozen; otherwise, all tasks in @cgrp are thawed.
- *
- * This function is protected by cgroup_mutex and is called from
- * cgroup_freeze_write().
- */
-static int cgroup_freeze(struct cgroup *cgrp, bool freeze)
-{
-	struct cgroup *dsct;
-
-	lockdep_assert_held(&cgroup_mutex);
-
-	if (!cgroup_on_dfl(cgrp))
-		return -EINVAL;
-
-	/*
-	 * If freezing, we need to freeze all tasks in the cgroup, including
-	 * tasks in descendant cgroups.  If unfreezing, we need to thaw all
-	 * tasks in the cgroup, including tasks in descendant cgroups.
-	 */
-	cgrp->freezer.freeze = freeze;
-
-	cgroup_for_each_live_descendant_pre(dsct, NULL, cgrp) {
-		struct task_struct *task;
-
-		rcu_read_lock();
-		for_each_process_thread(task) {
-			if (freeze)
-				cgroup_freeze_task(task);
-			else
-				cgroup_thaw_task(task);
-		}
-		rcu_read_unlock();
-	}
-
-	return 0;
-}
-
-static ssize_t cgroup_freeze_write(struct kernfs_open_file *of,
-				   char *buf, size_t nbytes, loff_t off)
-{
-	bool freeze;
-	int ret;
-
-	buf = strstrip(buf);
-	if (!strcmp(buf, "1")) {
-		freeze = true;
-	} else if (!strcmp(buf, "0")) {
-		freeze = false;
-	} else {
-		return -EINVAL;
-	}
-
-	ret = cgroup_freeze(of_css->cgroup, freeze);
-
-	return ret ?: nbytes;
-}
-
-static ssize_t cgroup_freeze_show(struct kernfs_open_file *of,
-				  char *buf, size_t nbytes, loff_t off)
-{
-	struct cgroup *cgrp = of_css->cgroup;
-
-	if (!cgroup_on_dfl(cgrp))
-		return -EINVAL;
-
-	return scnprintf(buf, nbytes, "%d\n", cgrp->freezer.freeze);
-}
