@@ -4542,7 +4542,9 @@ static int cgroup_freeze(struct cgroup *cgrp, bool freeze);
 
 static void cgroup_freeze_task(struct task_struct *task)
 {
-	mutex_lock(&task->sighand->siglock);
+	unsigned long flags;
+
+	spin_lock_irqsave(&task->sighand->siglock, flags);
 	if (frozen(task) || (task->flags & PF_KTHREAD))
 		goto unlock;
 
@@ -4550,18 +4552,20 @@ static void cgroup_freeze_task(struct task_struct *task)
 	__refrigerator(true);
 	freezer_count();
 unlock:
-	mutex_unlock(&task->sighand->siglock);
+	spin_unlock_irqrestore(&task->sighand->siglock, flags);
 }
 
 static void cgroup_thaw_task(struct task_struct *task)
 {
-	mutex_lock(&task->sighand->siglock);
+	unsigned long flags;
+
+	spin_lock_irqsave(&task->sighand->siglock, flags);
 	if (!frozen(task) || (task->flags & PF_KTHREAD))
 		goto unlock;
 
-	thaw_process(task);
+	__thaw_task(task);
 unlock:
-	mutex_unlock(&task->sighand->siglock);
+	spin_unlock_irqrestore(&task->sighand->siglock, flags);
 }
 
 static ssize_t cgroup_freeze_write(struct kernfs_open_file *of,
@@ -4580,23 +4584,37 @@ static ssize_t cgroup_freeze_write(struct kernfs_open_file *of,
 	}
 
 	mutex_lock(&cgroup_mutex);
-	ret = cgroup_freeze(of_css->cgroup, freeze);
+	ret = cgroup_freeze(of_css(of)->cgroup, freeze);
 	mutex_unlock(&cgroup_mutex);
 
 	return ret ?: nbytes;
 }
 
-static ssize_t cgroup_freeze_show(struct kernfs_open_file *of,
-				  char *buf, size_t nbytes, loff_t off)
+static int cgroup_freeze_show(struct seq_file *seq, void *v)
 {
-	struct cgroup *cgrp = of_css->cgroup;
+	struct cgroup *cgrp = seq->private;
 
-	return scnprintf(buf, nbytes, "%d\n", cgrp->freezer.freeze);
+	seq_printf(seq, "%d\n", cgrp->freezer.freeze);
+	return 0;
 }
+
+static int cgroup_freeze_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, cgroup_freeze_show, inode->i_private);
+}
+
+static const struct file_operations cgroup_freeze_fops = {
+	.open		= cgroup_freeze_open,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+	.write		= cgroup_freeze_write,
+};
 
 static int cgroup_freeze(struct cgroup *cgrp, bool freeze)
 {
 	struct cgroup *dsct;
+	struct task_struct *task;
 
 	lockdep_assert_held(&cgroup_mutex);
 
@@ -4605,17 +4623,20 @@ static int cgroup_freeze(struct cgroup *cgrp, bool freeze)
 
 	cgrp->freezer.freeze = freeze;
 
-	cgroup_for_each_live_descendant_pre(dsct, NULL, cgrp) {
-		struct task_struct *task;
+	css_for_each_descendant_pre(&dsct->self, &cgrp->self) {
+		if (!css_tryget_online(&dsct->self))
+			continue;
 
-		rcu_read_lock();
-		for_each_process_thread(task) {
-			if (freeze)
-				cgroup_freeze_task(task);
-			else
-				cgroup_thaw_task(task);
+		for_each_process(task) {
+			if (task->cgroups->dfl_cgrp == dsct) {
+				if (freeze)
+					cgroup_freeze_task(task);
+				else
+					cgroup_thaw_task(task);
+			}
 		}
-		rcu_read_unlock();
+
+		css_put(&dsct->self);
 	}
 
 	return 0;
