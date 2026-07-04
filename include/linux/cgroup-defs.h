@@ -382,6 +382,11 @@ struct cgroup {
 	/* used to store eBPF programs */
 	struct cgroup_bpf bpf;
 
+	/* cgroup v2 freezer state */
+	struct {
+		bool freeze;		/* whether the cgroup is frozen */
+	} freezer;
+
 	/* ids of the ancestors at each level including self */
 	int ancestor_ids[];
 };
