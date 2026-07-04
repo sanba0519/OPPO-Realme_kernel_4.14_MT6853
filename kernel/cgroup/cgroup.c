@@ -4603,14 +4603,6 @@ static int cgroup_freeze_open(struct inode *inode, struct file *file)
 	return single_open(file, cgroup_freeze_show, inode->i_private);
 }
 
-static const struct file_operations cgroup_freeze_fops = {
-	.open		= cgroup_freeze_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-	.write		= cgroup_freeze_write,
-};
-
 static int cgroup_freeze(struct cgroup *cgrp, bool freeze)
 {
 	struct cgroup *dsct;
@@ -4623,20 +4615,14 @@ static int cgroup_freeze(struct cgroup *cgrp, bool freeze)
 
 	cgrp->freezer.freeze = freeze;
 
-	css_for_each_descendant_pre(&dsct->self, &cgrp->self) {
-		if (!css_tryget_online(&dsct->self))
+	for_each_process(task) {
+		if (task_cgroup(task, 0) != cgrp)
 			continue;
 
-		for_each_process(task) {
-			if (task->cgroups->dfl_cgrp == dsct) {
-				if (freeze)
-					cgroup_freeze_task(task);
-				else
-					cgroup_thaw_task(task);
-			}
-		}
-
-		css_put(&dsct->self);
+		if (freeze)
+			cgroup_freeze_task(task);
+		else
+			cgroup_thaw_task(task);
 	}
 
 	return 0;
