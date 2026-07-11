@@ -779,6 +779,33 @@ struct cgroup_namespace *copy_cgroup_ns(unsigned long flags,
 int cgroup_path_ns(struct cgroup *cgrp, char *buf, size_t buflen,
 		   struct cgroup_namespace *ns);
 
+void cgroup_enter_frozen(void);
+void cgroup_leave_frozen(bool always_leave);
+void cgroup_update_frozen(struct cgroup *cgrp);
+void cgroup_freeze(struct cgroup *cgrp, bool freeze);
+void cgroup_freezer_migrate_task(struct task_struct *task, struct cgroup *src,
+				 struct cgroup *dst);
+void cgroup_freezer_frozen_exit(struct task_struct *task);
+
+static inline bool cgroup_task_freeze(struct task_struct *task)
+{
+	bool freeze;
+
+	if (task->flags & PF_KTHREAD)
+		return false;
+
+	rcu_read_lock();
+	freeze = test_bit(CGRP_FREEZE, &task_dfl_cgroup(task)->flags);
+	rcu_read_unlock();
+
+	return freeze;
+}
+
+static inline bool cgroup_task_frozen(struct task_struct *task)
+{
+	return task->frozen;
+}
+
 #else /* !CONFIG_CGROUPS */
 
 static inline void free_cgroup_ns(struct cgroup_namespace *ns) { }
@@ -787,6 +814,18 @@ copy_cgroup_ns(unsigned long flags, struct user_namespace *user_ns,
 	       struct cgroup_namespace *old_ns)
 {
 	return old_ns;
+}
+
+static inline void cgroup_enter_frozen(void) { }
+static inline void cgroup_leave_frozen(bool always_leave) { }
+static inline bool cgroup_task_freeze(struct task_struct *task)
+{
+	return false;
+}
+
+static inline bool cgroup_task_frozen(struct task_struct *task)
+{
+	return false;
 }
 
 #endif /* !CONFIG_CGROUPS */

@@ -52,7 +52,6 @@
 #include <linux/atomic.h>
 #include <linux/cpuset.h>
 #include <linux/proc_ns.h>
-#include <linux/freezer.h>
 #include <linux/nsproxy.h>
 #include <linux/file.h>
 #include <linux/psi.h>
@@ -532,6 +531,20 @@ static void cgroup_get_live(struct cgroup *cgrp)
 {
 	WARN_ON_ONCE(cgroup_is_dead(cgrp));
 	css_get(&cgrp->self);
+}
+
+/* Caller must hold css_set_lock. */
+int __cgroup_task_count(const struct cgroup *cgrp)
+{
+	struct cgrp_cset_link *link;
+	int count = 0;
+
+	lockdep_assert_held(&css_set_lock);
+
+	list_for_each_entry(link, &cgrp->cset_links, cset_link)
+		count += link->cset->nr_tasks;
+
+	return count;
 }
 
 struct cgroup_subsys_state *of_css(struct kernfs_open_file *of)
@@ -2280,8 +2293,15 @@ static int cgroup_migrate_execute(struct cgroup_mgctx *mgctx)
 			get_css_set(to_cset);
 			to_cset->nr_tasks++;
 			css_set_move_task(task, from_cset, to_cset, true);
-			put_css_set_locked(from_cset);
 			from_cset->nr_tasks--;
+
+			/*
+			 * A task crossing a default-hierarchy freezer boundary may
+			 * need a new trap and changes both cgroups' completion state.
+			 */
+			cgroup_freezer_migrate_task(task, from_cset->dfl_cgrp,
+						    to_cset->dfl_cgrp);
+			put_css_set_locked(from_cset);
 		}
 	}
 	spin_unlock_irq(&css_set_lock);
@@ -3326,8 +3346,15 @@ static ssize_t cgroup_max_depth_write(struct kernfs_open_file *of,
 
 static int cgroup_events_show(struct seq_file *seq, void *v)
 {
+	struct cgroup_subsys_state *css = seq_css(seq);
+	struct cgroup *cgrp = css->cgroup;
+
 	seq_printf(seq, "populated %d\n",
-		   cgroup_is_populated(seq_css(seq)->cgroup));
+		   cgroup_is_populated(cgrp));
+
+	seq_printf(seq, "frozen %d\n",
+		   test_bit(CGRP_FROZEN, &cgrp->flags));
+
 	return 0;
 }
 
@@ -4534,128 +4561,35 @@ out_unlock:
 	return ret ?: nbytes;
 }
 
-/*
- * cgroup v2 freezer support
- */
-
-static int cgroup_freeze(struct cgroup *cgrp, bool freeze);
-
-static void cgroup_update_frozen(struct cgroup *cgrp)
-{
-	bool all_frozen = cgrp->freezer.e_freeze;
-	struct css_task_iter it;
-	struct task_struct *task;
-
-	lockdep_assert_held(&cgroup_mutex);
-
-	rcu_read_lock();
-	css_task_iter_start(&cgrp->self, CSS_TASK_ITER_PROCS | CSS_TASK_ITER_THREADED,
-			    &it);
-	while ((task = css_task_iter_next(&it))) {
-		if ((task->flags & PF_KTHREAD))
-			continue;
-		if (!frozen(task)) {
-			all_frozen = false;
-			goto out_iter;
-		}
-	}
-out_iter:
-	css_task_iter_end(&it);
-	rcu_read_unlock();
-
-	if (cgrp->freezer.frozen == all_frozen)
-		return;
-
-	cgrp->freezer.frozen = all_frozen;
-	cgroup_file_notify(&cgrp->events_file);
-}
-
-static void cgroup_freeze_task(struct task_struct *task)
-{
-	unsigned long flags;
-
-	spin_lock_irqsave(&task->sighand->siglock, flags);
-	if (frozen(task) || (task->flags & PF_KTHREAD))
-		goto unlock;
-
-	freezer_do_not_count();
-	__refrigerator(true);
-	freezer_count();
-unlock:
-	spin_unlock_irqrestore(&task->sighand->siglock, flags);
-}
-
-static void cgroup_thaw_task(struct task_struct *task)
-{
-	unsigned long flags;
-
-	spin_lock_irqsave(&task->sighand->siglock, flags);
-	if (!frozen(task) || (task->flags & PF_KTHREAD))
-		goto unlock;
-
-	__thaw_task(task);
-unlock:
-	spin_unlock_irqrestore(&task->sighand->siglock, flags);
-}
-
-static ssize_t cgroup_freeze_write(struct kernfs_open_file *of,
-				   char *buf, size_t nbytes, loff_t off)
-{
-	bool freeze;
-	int ret;
-
-	buf = strstrip(buf);
-	if (!strcmp(buf, "1")) {
-		freeze = true;
-	} else if (!strcmp(buf, "0")) {
-		freeze = false;
-	} else {
-		return -EINVAL;
-	}
-
-	mutex_lock(&cgroup_mutex);
-	ret = cgroup_freeze(of_css(of)->cgroup, freeze);
-	mutex_unlock(&cgroup_mutex);
-
-	return ret ?: nbytes;
-}
-
+/* cgroup v2 freezer interface files. */
 static int cgroup_freeze_show(struct seq_file *seq, void *v)
 {
-	struct cgroup *cgrp = seq->private;
+	struct cgroup *cgrp = seq_css(seq)->cgroup;
 
 	seq_printf(seq, "%d\n", cgrp->freezer.freeze);
 	return 0;
 }
 
-static int cgroup_freeze_open(struct inode *inode, struct file *file)
+static ssize_t cgroup_freeze_write(struct kernfs_open_file *of,
+				   char *buf, size_t nbytes, loff_t off)
 {
-	return single_open(file, cgroup_freeze_show, inode->i_private);
-}
+	struct cgroup *cgrp;
+	int freeze, ret;
 
-static int cgroup_freeze(struct cgroup *cgrp, bool freeze)
-{
-	struct cgroup_subsys_state *pos;
-	bool ancestor_freeze;
+	ret = kstrtoint(strstrip(buf), 0, &freeze);
+	if (ret)
+		return ret;
+	if (freeze < 0 || freeze > 1)
+		return -ERANGE;
 
-	lockdep_assert_held(&cgroup_mutex);
+	cgrp = cgroup_kn_lock_live(of->kn, false);
+	if (!cgrp)
+		return -ENOENT;
 
-	if (!cgroup_on_dfl(cgrp))
-		return -EINVAL;
+	cgroup_freeze(cgrp, freeze);
+	cgroup_kn_unlock(of->kn);
 
-	cgrp->freezer.freeze = freeze;
-
-	for_each_process(task) {
-		if (task_cgroup(task, 0) != cgrp)
-			continue;
-
-		if (freeze)
-			cgroup_freeze_task(task);
-		else
-			cgroup_thaw_task(task);
-	}
-
-	return 0;
+	return nbytes;
 }
 
 /* cgroup core interface files for the default hierarchy */
@@ -5067,12 +5001,28 @@ static struct cgroup *cgroup_create(struct cgroup *parent)
 	if (ret)
 		goto out_idr_free;
 
+	/* A child inherits every effective freeze request from its parent. */
+	cgrp->freezer.e_freeze = parent->freezer.e_freeze;
+	if (cgrp->freezer.e_freeze) {
+		/*
+		 * The child is empty, so it is immediately frozen.  CGRP_FREEZE
+		 * ensures the first task attached to it receives a freezer trap.
+		 */
+		set_bit(CGRP_FREEZE, &cgrp->flags);
+		set_bit(CGRP_FROZEN, &cgrp->flags);
+	}
+
 	spin_lock_irq(&css_set_lock);
 	for (tcgrp = cgrp; tcgrp; tcgrp = cgroup_parent(tcgrp)) {
 		cgrp->ancestor_ids[tcgrp->level] = tcgrp->id;
 
-		if (tcgrp != cgrp)
+		if (tcgrp != cgrp) {
 			tcgrp->nr_descendants++;
+
+			/* Frozen descendants participate in ancestor completion. */
+			if (cgrp->freezer.e_freeze)
+				tcgrp->freezer.nr_frozen_descendants++;
+		}
 	}
 	spin_unlock_irq(&css_set_lock);
 
@@ -5366,6 +5316,9 @@ static int cgroup_destroy_locked(struct cgroup *cgrp)
 	for (tcgrp = cgroup_parent(cgrp); tcgrp; tcgrp = cgroup_parent(tcgrp)) {
 		tcgrp->nr_descendants--;
 		tcgrp->nr_dying_descendants++;
+
+		if (test_bit(CGRP_FROZEN, &cgrp->flags))
+			tcgrp->freezer.nr_frozen_descendants--;
 	}
 	spin_unlock_irq(&css_set_lock);
 
@@ -5818,6 +5771,23 @@ void cgroup_post_fork(struct task_struct *child)
 			cset->nr_tasks++;
 			css_set_move_task(child, NULL, cset, false);
 		}
+
+		/*
+		 * A freeze can race with fork.  Arm the child before it first
+		 * runs so it cannot escape a frozen default-hierarchy cgroup.
+		 */
+		if (unlikely(cgroup_task_freeze(child))) {
+			spin_lock(&child->sighand->siglock);
+			WARN_ON_ONCE(child->frozen);
+			child->jobctl |= JOBCTL_TRAP_FREEZE;
+			/* Force the first user return through get_signal(). */
+			set_tsk_thread_flag(child, TIF_SIGPENDING);
+			spin_unlock(&child->sighand->siglock);
+			/*
+			 * do_freezer_trap() will update completion after the child
+			 * enters the trap, avoiding a transient frozen notification.
+			 */
+		}
 		spin_unlock_irq(&css_set_lock);
 	}
 
@@ -5867,6 +5837,12 @@ void cgroup_exit(struct task_struct *tsk)
 		css_set_move_task(tsk, cset, NULL, false);
 		list_add_tail(&tsk->cg_list, &cset->dying_tasks);
 		cset->nr_tasks--;
+
+		if (unlikely(cgroup_task_frozen(tsk)))
+			cgroup_freezer_frozen_exit(tsk);
+		else if (unlikely(cgroup_task_freeze(tsk)))
+			cgroup_update_frozen(task_dfl_cgroup(tsk));
+
 		spin_unlock_irq(&css_set_lock);
 	} else {
 		get_css_set(cset);

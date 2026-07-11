@@ -348,13 +348,12 @@ static struct cgroup_pidlist *cgroup_pidlist_find_create(struct cgroup *cgrp,
  */
 int cgroup_task_count(const struct cgroup *cgrp)
 {
-	int count = 0;
-	struct cgrp_cset_link *link;
+	int count;
 
 	spin_lock_irq(&css_set_lock);
-	list_for_each_entry(link, &cgrp->cset_links, cset_link)
-		count += link->cset->nr_tasks;
+	count = __cgroup_task_count(cgrp);
 	spin_unlock_irq(&css_set_lock);
+
 	return count;
 }
 

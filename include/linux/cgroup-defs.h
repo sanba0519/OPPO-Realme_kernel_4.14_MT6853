@@ -64,6 +64,12 @@ enum {
 	 * specified at mount time and thus is implemented here.
 	 */
 	CGRP_CPUSET_CLONE_CHILDREN,
+
+	/* Control group has to be frozen. */
+	CGRP_FREEZE,
+
+	/* Control group and all its descendants are frozen. */
+	CGRP_FROZEN,
 };
 
 /* cgroup_root->flags */
@@ -258,6 +264,16 @@ struct css_set {
 	struct rcu_head rcu_head;
 };
 
+struct cgroup_freezer_state {
+	/* User-requested and effective hierarchical freeze state. */
+	bool freeze;
+	int e_freeze;
+
+	/* Protected by css_set_lock. */
+	int nr_frozen_descendants;
+	int nr_frozen_tasks;
+};
+
 struct cgroup {
 	/* self css with NULL ->ss, points back to this cgroup */
 	struct cgroup_subsys_state self;
@@ -383,9 +399,7 @@ struct cgroup {
 	struct cgroup_bpf bpf;
 
 	/* cgroup v2 freezer state */
-	struct {
-		bool freeze;		/* whether the cgroup is frozen */
-	} freezer;
+	struct cgroup_freezer_state freezer;
 
 	/* ids of the ancestors at each level including self */
 	int ancestor_ids[];
