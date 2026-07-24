@@ -8,11 +8,19 @@ on:
         description: "是否启用 BBR 加速（不了解请不要启用）"
         required: false
         default: true
+        
       DroidSpace:
         type: boolean
         description: "是否启用 DroidSpace（不了解请不要启用）"
         required: false
         default: false
+
+      TG:
+        type: boolean
+        description: "!!!请勿开启!!!/Don't Open"
+        required: false
+        default: false
+
       Branch:
         type: choice
         description: "选择要 clone 的分支（仅供开发者选择）"
@@ -20,7 +28,6 @@ on:
         default: main
         options:
           - main
-          - bpf
           - rebpf
 
     
