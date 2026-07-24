@@ -322,7 +322,6 @@ union bpf_attr {
 		__u32		kern_version;	/* checked when prog_type=kprobe */
 		__u32		prog_flags;
 		__u8		prog_name[BPF_OBJ_NAME_LEN];
-		char		prog_name[BPF_OBJ_NAME_LEN];
 		__u32		prog_ifindex;	/* ifindex of netdev to prep for */
 		/* For some prog types expected attach type must be known at
 		 * load time to verify attach type specific parts of prog
