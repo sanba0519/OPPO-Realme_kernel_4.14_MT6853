@@ -7,17 +7,29 @@ on:
         type: boolean
         description: "是否启用 BBR 加速（不了解请不要启用）"
         required: false
-        default: false
+        default: true
+        
       DroidSpace:
         type: boolean
         description: "是否启用 DroidSpace（不了解请不要启用）"
         required: false
         default: false
+
       TG:
         type: boolean
         description: "!!!请勿开启!!!/Don't Open"
         required: false
         default: false
+
+      Branch:
+        type: choice
+        description: "选择要 clone 的分支（仅供开发者选择）"
+        required: false
+        default: main
+        options:
+          - main
+          - rebpf
+
     
 jobs:
   build:
@@ -58,7 +70,9 @@ jobs:
     - name: Clone kernel source
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace
-        git clone -b main --single-branch https://github.com/sanba0519/OPPO-Realme_kernel_4.14_MT6853 android-kernel
+        CLONE_BRANCH="${{ github.event.inputs.Branch }}"
+        echo "使用 $CLONE_BRANCH 分支"
+        git clone -b "$CLONE_BRANCH" --single-branch https://github.com/sanba0519/OPPO-Realme_kernel_4.14_MT6853.git android-kernel
         cd android-kernel
 
     - name: Apply RKSU patch
@@ -93,22 +107,26 @@ jobs:
         export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang-aosp/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc64/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc32/bin:$PATH
         export ARCH=arm64
         export SUBARCH=arm64
+        export KBUILD_BUILD_HOST=coolapk@sanba
+        export KBUILD_BUILD_USER=GitHub@sanba0519
 
+        # 首先生成初始 .config（无论选项如何都必须执行）
+        make -j$(nproc --all) O=out ARCH=arm64 mt6853-ss_defconfig
+
+        # DroidSpace
         if [ "${{ github.event.inputs.DroidSpace }}" = "true" ]; then
           echo "启用 DroidSpace..."
-          make -s -j$(nproc --all) O=out ARCH=arm64 mt6853-ss_defconfig
-
-        ./scripts/config --file out/.config \
+          ./scripts/config --file out/.config \
             --enable NAMESPACES \
             --enable USER_NS \
             --enable DEVTMPFS \
             --enable DEVTMPFS_MOUNT
-        make O=out olddefconfig
+          make O=out olddefconfig
         else
           echo "不启用 DroidSpace..."
         fi
 
-        # 添加BBR
+        # BBR
         if [ "${{ github.event.inputs.BBR }}" = "true" ]; then
           echo "启用 BBR..."
           ./scripts/config --file out/.config \
@@ -119,14 +137,7 @@ jobs:
           echo "不启用 BBR..."
         fi
 
-        make O=out olddefconfig
-        cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
-        export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang-aosp/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc64/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc32/bin:$PATH
-        export KBUILD_BUILD_HOST=coolapk@sanba
-        export KBUILD_BUILD_USER=GitHub@sanba0519
-        make -s -j$(nproc --all) O=out ARCH=arm64 mt6853-ss_defconfig
-        make -s -j"$(nproc)" O=out ARCH=arm64 mt6853-ss_defconfig
-
+        # 最终配置修正
         ./scripts/config --file out/.config \
                 --enable CONFIG_NAMESPACES \
                 --enable CONFIG_DEVTMPFS \
@@ -135,6 +146,7 @@ jobs:
 
         make O=out ARCH=arm64 olddefconfig
 
+        # 编译
         make -j"$(nproc)" \
                 O=out \
                 ARCH=arm64 \
@@ -155,7 +167,6 @@ jobs:
           NAME="${NAME}-DroidSpace"
         fi
         echo "artifact_name=${NAME}" >> $GITHUB_OUTPUT
-
                 
     - name: Package AnyKernel3
       run: |
@@ -166,7 +177,6 @@ jobs:
         sed -i 's/is_slot_device=0;/is_slot_device=auto;/g' AnyKernel3/anykernel.sh
         cp android-kernel/out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
         rm -rf AnyKernel3/.git* AnyKernel3/README.md
-        zip -r "${{ steps.gen_name.outputs.artifact_name }}.zip" AnyKernel3/
         
     
     
@@ -175,44 +185,6 @@ jobs:
       with:
         name: ${{steps.gen_name.outputs.artifact_name}}
         path: kernel_workspace/AnyKernel3/*
+
       
-    - name: Generate Telegram caption
-      id: gen_caption
-      run: |
-        COMMIT_SHA=$(git rev-parse --short HEAD)
-        COMMIT_MSG=$(git log -1 --pretty=format:'%s')
-        echo "caption<<EOF" >> $GITHUB_OUTPUT
-        echo "<pre>" >> $GITHUB_OUTPUT
-        echo "🔧 Commit: ${COMMIT_SHA} - ${COMMIT_MSG}" >> $GITHUB_OUTPUT
-        echo "" >> $GITHUB_OUTPUT
-        echo "📦 Feature:" >> $GITHUB_OUTPUT
-        if [ "${{ github.event.inputs.BBR }}" = "true" ]; then
-          echo "✅ BBR" >> $GITHUB_OUTPUT
-        else
-          echo "❌ BBR" >> $GITHUB_OUTPUT
-        fi
-        if [ "${{ github.event.inputs.DroidSpace }}" = "true" ]; then
-          echo "✅ DroidSpace" >> $GITHUB_OUTPUT
-        else
-          echo "❌ DroidSpace" >> $GITHUB_OUTPUT
-        fi
-        echo "</pre>" >> $GITHUB_OUTPUT
-        echo "EOF" >> $GITHUB_OUTPUT
       
-    - name: Upload to Telegram
-      env:
-          API_ID: ${{ secrets.API_ID }}
-          API_HASH: ${{ secrets.API_HASH }}
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          CHAT_ID: ${{ secrets.CHAT_ID }}
-          BOT_CI_SESSION: ${{ secrets.BOT_CI_SESSION }}
-          CAPTION: ${{ steps.gen_caption.outputs.caption }}
-      run: |
-        if [ "${{ github.event.inputs.TG }}" = "true" ]; then
-          echo "------------正在上传到Telegram------------"
-          pip3 install telethon
-          python3 .github/bot.py --caption "$CAPTION" \
-            "$GITHUB_WORKSPACE/kernel_workspace/${{ steps.gen_name.outputs.artifact_name }}.zip"
-        else
-          echo "------------跳过ing------------"
-          fi

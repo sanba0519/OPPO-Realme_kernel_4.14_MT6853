@@ -124,12 +124,12 @@ s32 map_cg_regs(struct mt_i2c *i2c)
 		cg_node = of_find_compatible_node(NULL, NULL,
 			i2c->dev_comp->clk_compatible);
 		if (!cg_node) {
-			pr_info("Cannot find cg_node\n");
+			pr_debug("Cannot find cg_node\n");
 			return -ENODEV;
 		}
 		cg_base = of_iomap(cg_node, 0);
 		if (!cg_base) {
-			pr_info("cg_base iomap failed\n");
+			pr_debug("cg_base iomap failed\n");
 			return -ENOMEM;
 		}
 		ret = 0;
@@ -144,7 +144,7 @@ void dump_cg_regs(struct mt_i2c *i2c)
 	u32 clk_sel_val, arbit_val, clk_sel_offs, arbit_offs;
 
 	if (!cg_base || i2c->id >= I2C_MAX_CHANNEL) {
-		pr_info("cg_base %p, i2c id = %d\n", cg_base, i2c->id);
+		pr_debug("cg_base %p, i2c id = %d\n", cg_base, i2c->id);
 		return;
 	}
 
@@ -152,7 +152,7 @@ void dump_cg_regs(struct mt_i2c *i2c)
 	clk_sta_val = readl(cg_base + clk_sta_offs);
 	cg_bit = i2c->cg_bit;
 
-	pr_info("[I2C] cg regs dump:\n"
+	pr_debug("[I2C] cg regs dump:\n"
 		"name %s, offset 0x%x: value = 0x%08x, bit %d, clock %s\n",
 		i2c->dev_comp->clk_compatible,
 		clk_sta_offs, clk_sta_val, cg_bit,
@@ -163,7 +163,7 @@ void dump_cg_regs(struct mt_i2c *i2c)
 	clk_sel_val = readl(cg_base + clk_sel_offs);
 	arbit_offs = i2c->dev_comp->arbit_offset;
 	arbit_val = readl(cg_base + arbit_offs);
-	pr_info("[I2C] clk src & arbit dump:\n"
+	pr_debug("[I2C] clk src & arbit dump:\n"
 		"name: %s, clk_sel_offs: 0x%x, val=0x%08x, arbit_offs: 0x%x, val=0x%08x\n",
 			i2c->dev_comp->clk_compatible,
 			clk_sel_offs, clk_sel_val,
@@ -178,12 +178,12 @@ s32 map_dma_regs(void)
 
 	dma_node = of_find_compatible_node(NULL, NULL, "mediatek,ap_dma");
 	if (!dma_node) {
-		pr_info("Cannot find dma_node\n");
+		pr_debug("Cannot find dma_node\n");
 		return -ENODEV;
 	}
 	dma_base = of_iomap(dma_node, 0);
 	if (!dma_base) {
-		pr_info("dma_base iomap failed\n");
+		pr_debug("dma_base iomap failed\n");
 		return -ENOMEM;
 	}
 	return 0;
@@ -195,15 +195,15 @@ void dump_dma_regs(void)
 	int i;
 
 	if (!dma_base) {
-		pr_info("dma_base NULL\n");
+		pr_debug("dma_base NULL\n");
 		return;
 	}
 
 	status =  readl(dma_base + 8);
-	pr_info("DMA RUNNING STATUS : 0x%x .\n", status);
+	pr_debug("DMA RUNNING STATUS : 0x%x .\n", status);
 	for (i = 0; i < 21 ; i++) {
 		if (status & (0x1 << i))
-			pr_info("DMA[%d] CONTROL REG : 0x%x, DEBUG : 0x%x .\n",
+			pr_debug("DMA[%d] CONTROL REG : 0x%x, DEBUG : 0x%x .\n",
 				i,
 				readl(dma_base + 0x80 + 0x80 * i + 0x18),
 				readl(dma_base + 0x80 + 0x80 * i + 0x50));
@@ -290,7 +290,7 @@ static void dump_i2c_info(struct mt_i2c *i2c)
 	if (i2c->buffermode) /* no i2c history @ buffermode */
 		return;
 
-	dev_info(i2c->dev, "last transfer info:\n");
+	dev_dbg(i2c->dev, "last transfer info:\n");
 
 	for (i = 0; i < I2C_RECORD_LEN; i++) {
 		if (idx == 0)
@@ -298,7 +298,7 @@ static void dump_i2c_info(struct mt_i2c *i2c)
 		idx--;
 		endtime = i2c->rec_info[idx].end_time;
 		ns = do_div(endtime, 1000000000);
-		dev_info(i2c->dev,
+		dev_dbg(i2c->dev,
 			"[%02d] [%5lu.%06lu] SLAVE_ADDR=%x,INTR_STAT=%x,CONTROL=%x,FIFO_STAT=%x,DEBUGSTAT=%x, tmo=%d\n",
 			i,
 			(unsigned long)endtime,
@@ -349,7 +349,7 @@ static int mt_i2c_clock_enable(struct mt_i2c *i2c)
 		i2c->cg_cnt++;
 	spin_unlock(&i2c->cg_lock);
 	if (ret) {
-		dev_info(i2c->dev, "err, access at suspend no irq stage\n");
+		dev_dbg(i2c->dev, "err, access at suspend no irq stage\n");
 		goto err_cg;
 	}
 
@@ -402,7 +402,7 @@ static inline void mt_i2c_wait_done(struct mt_i2c *i2c, u16 ch_off)
 
 	start = raw_i2c_readw(i2c, ch_off, OFFSET_START) & I2C_TRANSAC_START;
 	if (start) {
-		dev_info(i2c->dev, "wait transfer done before cg off.\n");
+		dev_dbg(i2c->dev, "wait transfer done before cg off.\n");
 
 		tmo = 100;
 		do {
@@ -413,7 +413,7 @@ static inline void mt_i2c_wait_done(struct mt_i2c *i2c, u16 ch_off)
 		} while (start && tmo);
 
 		if (start && !tmo) {
-			dev_info(i2c->dev, "wait transfer timeout.\n");
+			dev_dbg(i2c->dev, "wait transfer timeout.\n");
 			i2c_dump_info(i2c);
 		}
 	}
@@ -450,7 +450,7 @@ static inline void mt_i2c_init_hw(struct mt_i2c *i2c)
 	i2c_writel_dma(I2C_DMA_WARM_RST, i2c, OFFSET_RST);
 	udelay(5);
 	if (i2c_readl_dma(i2c, OFFSET_EN) != 0) {
-		dev_info(i2c->dev, "DMA bus hang .\n");
+		dev_dbg(i2c->dev, "DMA bus hang .\n");
 		dump_dma_regs();
 		WARN_ON(1);
 	}
@@ -612,41 +612,41 @@ static int i2c_set_speed(struct mt_i2c *i2c, unsigned int clk_src_in_hz)
 void i2c_dump_info1(struct mt_i2c *i2c)
 {
 	if (i2c->ext_data.isEnable && i2c->ext_data.timing)
-		dev_info(i2c->dev, "I2C structure:\nspeed %d\n",
+		dev_dbg(i2c->dev, "I2C structure:\nspeed %d\n",
 			i2c->ext_data.timing);
 	else
-		dev_info(i2c->dev, "I2C structure:\nspeed %d\n",
+		dev_dbg(i2c->dev, "I2C structure:\nspeed %d\n",
 			i2c->speed_hz);
-	dev_info(i2c->dev, "I2C structure:\nOp %x\n", i2c->op);
-	dev_info(i2c->dev,
+	dev_dbg(i2c->dev, "I2C structure:\nOp %x\n", i2c->op);
+	dev_dbg(i2c->dev,
 		"I2C structure:\nData_size %x\nIrq_stat %x\nTrans_stop %d\n",
 		i2c->msg_len, i2c->irq_stat, i2c->trans_stop);
-	dev_info(i2c->dev, "base address %p\n", i2c->base);
-	dev_info(i2c->dev,
+	dev_dbg(i2c->dev, "base address %p\n", i2c->base);
+	dev_dbg(i2c->dev,
 		"I2C register:\nSLAVE_ADDR %x\nINTR_MASK %x\n",
 		(i2c_readw(i2c, OFFSET_SLAVE_ADDR)),
 		(i2c_readw(i2c, OFFSET_INTR_MASK)));
-	dev_info(i2c->dev,
+	dev_dbg(i2c->dev,
 		"I2C register:\nINTR_STAT %x\nCONTROL %x\n",
 		(i2c_readw(i2c, OFFSET_INTR_STAT)),
 		(i2c_readw(i2c, OFFSET_CONTROL)));
-	dev_info(i2c->dev,
+	dev_dbg(i2c->dev,
 		"I2C register:\nTRANSFER_LEN %x\nTRANSAC_LEN %x\n",
 		(i2c_readw(i2c, OFFSET_TRANSFER_LEN)),
 		(i2c_readw(i2c, OFFSET_TRANSAC_LEN)));
-	dev_info(i2c->dev,
+	dev_dbg(i2c->dev,
 		"I2C register:\nDELAY_LEN %x\nTIMING %x\n",
 		(i2c_readw(i2c, OFFSET_DELAY_LEN)),
 		(i2c_readw(i2c, OFFSET_TIMING)));
-	dev_info(i2c->dev,
+	dev_dbg(i2c->dev,
 		"I2C register:\nSTART %x\nFIFO_STAT %x\n",
 		(i2c_readw(i2c, OFFSET_START)),
 		(i2c_readw(i2c, OFFSET_FIFO_STAT)));
-	dev_info(i2c->dev,
+	dev_dbg(i2c->dev,
 		"I2C register:\nIO_CONFIG %x\nHS %x\n",
 		(i2c_readw(i2c, OFFSET_IO_CONFIG)),
 		(i2c_readw(i2c, OFFSET_HS)));
-	dev_info(i2c->dev,
+	dev_dbg(i2c->dev,
 		"I2C register:\nDEBUGSTAT %x\nEXT_CONF %x\nPATH_DIR %x\n",
 		(i2c_readw(i2c, OFFSET_DEBUGSTAT)),
 		(i2c_readw(i2c, OFFSET_EXT_CONF)),
@@ -661,7 +661,7 @@ void i2c_dump_info(struct mt_i2c *i2c)
 	unsigned int pin_val = 0;
 	if (i2c->id == i2c->reset_bus) {
 		if (i2c->gpiobase) {
-			dev_info(i2c->dev, "I2C gpio structure:"
+			dev_dbg(i2c->dev, "I2C gpio structure:"
 					I2CTAG "PU_CFG1=0x%x,PU_CFG0=0x%x,RSEL_CFG=0x%x,MOD_CFG1=0x%x,MOD_CFG0=0x%x\n",
 					readl(i2c->gpiobase + 0xc0),
 					readl(i2c->gpiobase + 0xb0),
@@ -670,15 +670,15 @@ void i2c_dump_info(struct mt_i2c *i2c)
 					readl(i2c->gpiobase + 0x40));
 			if (pin_din) {
 				pin_val = readl(pin_din);
-				dev_info(i2c->dev, "pin value:0x%x\n",pin_val);
+				dev_dbg(i2c->dev, "pin value:0x%x\n",pin_val);
 			}
 		} else {
-			dev_info(i2c->dev, "i2c gpiobase is NULL\n");
+			dev_dbg(i2c->dev, "i2c gpiobase is NULL\n");
 		}
 	}
 #endif
-	pr_info_ratelimited("%s: +++++++++++++++++++\n", __func__);
-	pr_info_ratelimited("I2C structure:\n"
+	pr_debug_ratelimited("%s: +++++++++++++++++++\n", __func__);
+	pr_debug_ratelimited("I2C structure:\n"
 	       I2CTAG "Clk=%ld,Id=%d,Op=0x%x,Irq_stat=0x%x,Total_len=0x%x\n"
 	       I2CTAG "Trans_len=0x%x,Trans_num=0x%x,Trans_auxlen=0x%x,\n"
 	       I2CTAG "speed=%d,Trans_stop=%u,cg_cnt=%d,hs_only=%d,\n"
@@ -688,8 +688,8 @@ void i2c_dump_info(struct mt_i2c *i2c)
 			i2c->trans_stop, i2c->cg_cnt,
 			i2c->hs_only, i2c->ch_offset, i2c->ch_offset_default);
 
-	pr_info_ratelimited("base addr:0x%p\n", i2c->base);
-	pr_info_ratelimited("I2C register:\n"
+	pr_debug_ratelimited("base addr:0x%p\n", i2c->base);
+	pr_debug_ratelimited("I2C register:\n"
 	       I2CTAG "SLAVE_ADDR=0x%x,INTR_MASK=0x%x,INTR_STAT=0x%x,\n"
 	       I2CTAG "CONTROL=0x%x,TRANSFER_LEN=0x%x,TRANSAC_LEN=0x%x,\n"
 	       I2CTAG "DELAY_LEN=0x%x,TIMING=0x%x,LTIMING=0x%x,START=0x%x\n"
@@ -718,7 +718,7 @@ void i2c_dump_info(struct mt_i2c *i2c)
 	       (i2c_readw(i2c, OFFSET_DMA_FSM_DEBUG)),
 	       (i2c_readw(i2c, OFFSET_MCU_INTR)));
 
-	pr_info_ratelimited("before enable DMA register(0x%lx):\n"
+	pr_debug_ratelimited("before enable DMA register(0x%lx):\n"
 	       I2CTAG "INT_FLAG=0x%x,INT_EN=0x%x,EN=0x%x,RST=0x%x,\n"
 	       I2CTAG "STOP=0x%x,FLUSH=0x%x,CON=0x%x,\n"
 	       I2CTAG "TX_MEM_ADDR=0x%x, RX_MEM_ADDR=0x%x\n"
@@ -739,7 +739,7 @@ void i2c_dump_info(struct mt_i2c *i2c)
 	       g_dma_regs[i2c->id].int_buf_size, g_dma_regs[i2c->id].debug_sta,
 	       g_dma_regs[i2c->id].tx_mem_addr2,
 	       g_dma_regs[i2c->id].rx_mem_addr2);
-	pr_info_ratelimited("DMA register(0x%p):\n"
+	pr_debug_ratelimited("DMA register(0x%p):\n"
 	       I2CTAG "INT_FLAG=0x%x,INT_EN=0x%x,EN=0x%x,RST=0x%x,\n"
 	       I2CTAG "STOP=0x%x,FLUSH=0x%x,CON=0x%x,\n"
 	       I2CTAG "TX_MEM_ADDR=0x%x, RX_MEM_ADDR=0x%x,\n"
@@ -761,11 +761,11 @@ void i2c_dump_info(struct mt_i2c *i2c)
 	       (i2c_readl_dma(i2c, OFFSET_DEBUG_STA)),
 	       (i2c_readl_dma(i2c, OFFSET_TX_MEM_ADDR2)),
 	       (i2c_readl_dma(i2c, OFFSET_RX_MEM_ADDR2)));
-	pr_info_ratelimited("%s: -----------------------\n", __func__);
+	pr_debug_ratelimited("%s: -----------------------\n", __func__);
 
 	//dump_i2c_info(i2c);
 	if (i2c->ccu_offset) {
-		dev_info(i2c->dev, "I2C CCU register:\n"
+		dev_dbg(i2c->dev, "I2C CCU register:\n"
 		I2CTAG "SLAVE_ADDR=0x%x,INTR_MASK=0x%x,\n"
 		I2CTAG "INTR_STAT=0x%x,CONTROL=0x%x,\n"
 		I2CTAG "TRANSFER_LEN=0x%x, TRANSAC_LEN=0x%x,DELAY_LEN=0x%x\n"
@@ -802,7 +802,7 @@ void i2c_dump_info(struct mt_i2c *i2c)
 	unsigned int pin_val = 0;
 	if (i2c->id == i2c->reset_bus) {
 		if (i2c->gpiobase) {
-			dev_info(i2c->dev, "I2C gpio structure:"
+			dev_dbg(i2c->dev, "I2C gpio structure:"
 					I2CTAG "PU_CFG1=0x%x,PU_CFG0=0x%x,RSEL_CFG=0x%x,MOD_CFG1=0x%x,MOD_CFG0=0x%x\n",
 					readl(i2c->gpiobase + 0xc0),
 					readl(i2c->gpiobase + 0xb0),
@@ -811,10 +811,10 @@ void i2c_dump_info(struct mt_i2c *i2c)
 					readl(i2c->gpiobase + 0x40));
 			if (pin_din) {
 				pin_val = readl(pin_din);
-				dev_info(i2c->dev, "pin value:0x%x\n",pin_val);
+				dev_dbg(i2c->dev, "pin value:0x%x\n",pin_val);
 			}
 		} else {
-			dev_info(i2c->dev, "i2c gpiobase is NULL\n");
+			dev_dbg(i2c->dev, "i2c gpiobase is NULL\n");
 		}
 	}
 #endif
@@ -825,27 +825,27 @@ void i2c_gpio_dump_info(struct mt_i2c *i2c)
 {
 #ifndef CONFIG_MT_I2C_FPGA_ENABLE
 	if (i2c->gpiobase) {
-		dev_info(i2c->dev, "%s +++++++++++++++++++\n", __func__);
+		dev_dbg(i2c->dev, "%s +++++++++++++++++++\n", __func__);
 		//gpio_dump_regs_range(i2c->scl_gpio_id, i2c->sda_gpio_id);
-		dev_info(i2c->dev, "I2C gpio structure:\n"
+		dev_dbg(i2c->dev, "I2C gpio structure:\n"
 		       I2CTAG "EH_CFG=0x%x,PU_CFG=0x%x,RSEL_CFG=0x%x\n",
 		       readl(i2c->gpiobase + i2c->offset_eh_cfg),
 		       readl(i2c->gpiobase + i2c->offset_pu_cfg),
 		       readl(i2c->gpiobase + i2c->offset_rsel_cfg));
 	} else
-		dev_info(i2c->dev, "i2c gpiobase is NULL\n");
+		dev_dbg(i2c->dev, "i2c gpiobase is NULL\n");
 #endif
 }
 
 void dump_i2c_status(int id)
 {
 	if (id >= I2C_MAX_CHANNEL) {
-		pr_info("error %s, id = %d\n", __func__, id);
+		pr_debug("error %s, id = %d\n", __func__, id);
 		return;
 	}
 
 	if (!g_mt_i2c[id]) {
-		pr_info("error %s, g_mt_i2c[%d] == NULL\n", __func__, id);
+		pr_debug("error %s, g_mt_i2c[%d] == NULL\n", __func__, id);
 		return;
 	}
 
@@ -983,7 +983,7 @@ static int mt_i2c_do_transfer(struct mt_i2c *i2c)
 		if (!i2c->fifo_only)
 			isDMA = true;
 		else {
-			dev_info(i2c->dev, "i2c does not support dma mode\n");
+			dev_dbg(i2c->dev, "i2c does not support dma mode\n");
 			return -EINVAL;
 		}
 
@@ -995,7 +995,7 @@ static int mt_i2c_do_transfer(struct mt_i2c *i2c)
 		i2c->ch_offset = i2c->ext_data.ch_offset;
 		i2c->ch_offset_dma = i2c->ext_data.ch_offset_dma;
 		if (i2c->ext_data.ch_offset == 0) {
-			dev_info(i2c->dev, "Wrong channel offset for multi-channel\n");
+			dev_dbg(i2c->dev, "Wrong channel offset for multi-channel\n");
 			i2c->ch_offset = i2c->ccu_offset;
 		}
 	} else {
@@ -1013,7 +1013,7 @@ static int mt_i2c_do_transfer(struct mt_i2c *i2c)
 	ret = i2c_set_speed(i2c, I2C_CLK_RATE);
 #endif
 	if (ret) {
-		dev_info(i2c->dev, "Failed to set the speed\n");
+		dev_dbg(i2c->dev, "Failed to set the speed\n");
 		return -EINVAL;
 	}
 
@@ -1029,12 +1029,12 @@ static int mt_i2c_do_transfer(struct mt_i2c *i2c)
 		      (((i2c->ltiming_reg & LSAMPLE_MSK) >> 6) + 1));
 		tv = DIV_ROUND_UP(tv1, tv2);
 		i2c_writew(tv & 0xFFFF, i2c, OFFSET_HW_TIMEOUT);
-		/* dev_info(i2c->dev, "scl time out value %04X\n", */
+		/* dev_dbg(i2c->dev, "scl time out value %04X\n", */
 		/*	    (u16)(tv & 0xFFFF));		   */
 	}
 	if (i2c->dev_comp->set_dt_div) {
 		if (i2c->clk_src_div > MAX_CLOCK_DIV) {
-			dev_info(i2c->dev, "Clock div error\n");
+			dev_dbg(i2c->dev, "Clock div error\n");
 			return -EINVAL;
 		}
 		i2c_writew(((i2c->clk_src_div - 1) << 8) +
@@ -1259,7 +1259,7 @@ static int mt_i2c_do_transfer(struct mt_i2c *i2c)
 		if (!i2c->is_ccu_trig)
 			i2c_writew(I2C_MCU_INTR_EN, i2c, OFFSET_MCU_INTR);
 		else {
-			dev_info(i2c->dev, "I2C CCU trig.\n");
+			dev_dbg(i2c->dev, "I2C CCU trig.\n");
 			return 0;
 		}
 	}
@@ -1269,7 +1269,7 @@ static int mt_i2c_do_transfer(struct mt_i2c *i2c)
 	if (!i2c->is_hw_trig)
 		i2c_writew(I2C_TRANSAC_START, i2c, OFFSET_START);
 	else {
-		dev_info(i2c->dev, "I2C hw trig.\n");
+		dev_dbg(i2c->dev, "I2C hw trig.\n");
 		return 0;
 	}
 
@@ -1278,10 +1278,10 @@ static int mt_i2c_do_transfer(struct mt_i2c *i2c)
 	record_i2c_info(i2c, tmo);
 
 	if (tmo == 0) {
-		dev_info(i2c->dev, "addr:0x%x,transfer timeout\n",
+		dev_dbg(i2c->dev, "addr:0x%x,transfer timeout\n",
 			i2c->addr);
 		start_reg = i2c_readw(i2c, OFFSET_START);
-		dev_info(i2c->dev,
+		dev_dbg(i2c->dev,
 			"timeout:start=0x%x,ch_err=0x%x\n",
 			start_reg, i2c_readw(i2c, OFFSET_ERROR));
 #ifdef OPLUS_FEATURE_CHG_BASIC
@@ -1322,19 +1322,19 @@ static int mt_i2c_do_transfer(struct mt_i2c *i2c)
 		/* This slave addr is used to check whether the shadow RG is */
 		/* mapped normally or not */
 		if (i2c->dev_comp->fifo_support == FIFO_SUPPORT_WIDTH_8BIT)
-			dev_info(i2c->dev, "SLAVE_ADDR=0x%x (shadow RG)",
+			dev_dbg(i2c->dev, "SLAVE_ADDR=0x%x (shadow RG)",
 				i2c_readw_shadow(i2c, OFFSET_SLAVE_ADDR));
 		else if (i2c->dev_comp->fifo_support == FIFO_SUPPORT_WIDTH_64BIT)
-			dev_info(i2c->dev, "SLAVE_ADDR=0x%x (shadow RG)",
+			dev_dbg(i2c->dev, "SLAVE_ADDR=0x%x (shadow RG)",
 				_i2c_readw(i2c, OFFSET_SLAVE_ADDR1));
 		mt_i2c_init_hw(i2c);
 		if ((i2c->ch_offset) && (start_reg & I2C_RESUME_ARBIT)) {
 			i2c_writew_shadow(I2C_RESUME_ARBIT, i2c, OFFSET_START);
-			dev_info(i2c->dev, "bus channel transferred\n");
+			dev_dbg(i2c->dev, "bus channel transferred\n");
 		}
 
 		if (start_reg & I2C_TRANSAC_START) {
-			dev_info(i2c->dev, "bus tied low/high(0x%x)\n",
+			dev_dbg(i2c->dev, "bus tied low/high(0x%x)\n",
 				start_reg);
 			return -EIO;
 		}
@@ -1342,7 +1342,7 @@ static int mt_i2c_do_transfer(struct mt_i2c *i2c)
 	}
 	if (i2c->irq_stat & (I2C_HS_NACKERR | I2C_ACKERR |
 	    I2C_TIMEOUT | I2C_BUS_ERR | I2C_IBI)) {
-		dev_info(i2c->dev,
+		dev_dbg(i2c->dev,
 			"error:addr=0x%x,irq_stat=0x%x,ch_offset=0x%x,mask:0x%x\n",
 			i2c->addr, i2c->irq_stat, i2c->ch_offset, int_reg);
 #ifdef OPLUS_FEATURE_CHG_BASIC
@@ -1375,25 +1375,25 @@ static int mt_i2c_do_transfer(struct mt_i2c *i2c)
 			i2c_dump_info(i2c);
 			i2c_gpio_dump_info(i2c);
 		} else
-			dev_info(i2c->dev, "addr:0x%x,ext_data skip more log\n",
+			dev_dbg(i2c->dev, "addr:0x%x,ext_data skip more log\n",
 				i2c->addr);
 
 		if ((i2c->irq_stat & (I2C_HS_NACKERR | I2C_ACKERR)))
-			dev_info(i2c->dev, "addr:0x%x,ACK error\n", i2c->addr);
+			dev_dbg(i2c->dev, "addr:0x%x,ACK error\n", i2c->addr);
 
 		if (i2c->irq_stat & I2C_TIMEOUT)
-			dev_info(i2c->dev, "addr:0x%x,SCL tied low timeout error\n",
+			dev_dbg(i2c->dev, "addr:0x%x,SCL tied low timeout error\n",
 				i2c->addr);
 
 		if ((i2c->irq_stat & I2C_BUS_ERR))
-			dev_info(i2c->dev,
+			dev_dbg(i2c->dev,
 				"bus error:start=0x%x,ch_err=0x%x,dbg_stat=0x%x\n",
 				i2c_readw(i2c, OFFSET_START),
 				i2c_readw(i2c, OFFSET_ERROR),
 				i2c_readw(i2c, OFFSET_DEBUGSTAT));
 
 		if ((i2c->irq_stat & I2C_IBI)) {
-			dev_info(i2c->dev,
+			dev_dbg(i2c->dev,
 				"IBI error:start=0x%x,ch_err=0x%x,dbg_stat=0x%x\n",
 				i2c_readw(i2c, OFFSET_START),
 				i2c_readw(i2c, OFFSET_ERROR),
@@ -1402,7 +1402,7 @@ static int mt_i2c_do_transfer(struct mt_i2c *i2c)
 
 		if ((i2c->irq_stat & I2C_TRANSAC_COMP) && i2c->ch_offset &&
 		    (!(i2c->irq_stat & I2C_BUS_ERR))) {
-			dev_info(i2c->dev, "trans done with error");
+			dev_dbg(i2c->dev, "trans done with error");
 			return -EREMOTEIO;
 		}
 
@@ -1412,7 +1412,7 @@ static int mt_i2c_do_transfer(struct mt_i2c *i2c)
 			if (i2c->ch_offset) {
 				i2c_writew_shadow(I2C_RESUME_ARBIT,
 					i2c, OFFSET_START);
-				dev_info(i2c->dev, "bus channel transferred\n");
+				dev_dbg(i2c->dev, "bus channel transferred\n");
 			}
 		}
 		return -EREMOTEIO;
@@ -1584,19 +1584,19 @@ int i2c_tui_enable_clock(int id)
 
 	adap = i2c_get_adapter(id);
 	if (!adap) {
-		pr_info("Cannot get adapter\n");
+		pr_debug("Cannot get adapter\n");
 		return -1;
 	}
 
 	i2c = i2c_get_adapdata(adap);
 	ret = clk_prepare_enable(i2c->clk_main);
 	if (ret) {
-		pr_info("Cannot enable main clk\n");
+		pr_debug("Cannot enable main clk\n");
 		return ret;
 	}
 	ret = clk_prepare_enable(i2c->clk_dma);
 	if (ret) {
-		pr_info("Cannot enable dma clk\n");
+		pr_debug("Cannot enable dma clk\n");
 		clk_disable_unprepare(i2c->clk_main);
 		return ret;
 	}
@@ -1611,7 +1611,7 @@ int i2c_tui_disable_clock(int id)
 
 	adap = i2c_get_adapter(id);
 	if (!adap) {
-		pr_info("Cannot get adapter\n");
+		pr_debug("Cannot get adapter\n");
 		return -1;
 	}
 
@@ -1780,7 +1780,7 @@ static irqreturn_t mt_i2c_irq(int irqno, void *dev_id)
 	if (!i2c->is_hw_trig) {
 		wake_up(&i2c->wait);
 		if (!i2c->irq_stat) {
-			dev_info(i2c->dev, "addr: 0x%x, irq stat 0\n",
+			dev_dbg(i2c->dev, "addr: 0x%x, irq stat 0\n",
 				i2c->addr);
 
 			#if defined(CONFIG_MTK_GIC_EXT)
@@ -1789,18 +1789,18 @@ static irqreturn_t mt_i2c_irq(int irqno, void *dev_id)
 		} else {
 			/* for bxx debug start */
 			if ((i2c->irq_stat & (I2C_IBI | I2C_BUS_ERR))) {
-				dev_info(i2c->dev, "[bxx]cg_cnt:%d,irq_stat:0x%x\n",
+				dev_dbg(i2c->dev, "[bxx]cg_cnt:%d,irq_stat:0x%x\n",
 					i2c->cg_cnt, i2c->irq_stat);
 			}
 		}
 	} else {/* dump regs info for hw trig i2c if ACK err */
 		if (i2c->irq_stat & (I2C_HS_NACKERR | I2C_ACKERR)) {
-			dev_info(i2c->dev, "addr:0x%x,irq_stat:0x%x,transfer ACK error\n",
+			dev_dbg(i2c->dev, "addr:0x%x,irq_stat:0x%x,transfer ACK error\n",
 				i2c->addr, i2c->irq_stat);
 			i2c_dump_info(i2c);
 			mt_i2c_init_hw(i2c);
 		} else {
-			dev_info(i2c->dev, "addr:0x%x, other irq_stat:0x%x\n",
+			dev_dbg(i2c->dev, "addr:0x%x, other irq_stat:0x%x\n",
 				i2c->addr, i2c->irq_stat);
 		}
 	}
@@ -1867,7 +1867,7 @@ static int mt_i2c_parse_dt(struct device_node *np, struct mt_i2c *i2c)
 	ret = of_property_read_u32(np, "apdma_size", &i2c->apdma_size);
 	if (ret)
 		i2c->apdma_size = MAX_DMA_TRANS_SIZE;
-	pr_info("[I2C]id:%d,freq:%d,div:%d,ch_offset:0x%x,offset_dma:0x%x,offset_ccu:0x%x,apdma_size:0x%x\n",
+	pr_debug("[I2C]id:%d,freq:%d,div:%d,ch_offset:0x%x,offset_dma:0x%x,offset_ccu:0x%x,apdma_size:0x%x\n",
 		i2c->id, i2c->speed_hz, i2c->clk_src_div,
 		i2c->ch_offset_default,
 		i2c->ch_offset_dma_default, i2c->ccu_offset, i2c->apdma_size);
@@ -1884,7 +1884,7 @@ int mt_i2c_parse_comp_data(void)
 
 	comp_node = of_find_compatible_node(NULL, NULL, "mediatek,i2c_common");
 	if (!comp_node) {
-		pr_info("Cannot find i2c_common node\n");
+		pr_debug("Cannot find i2c_common node\n");
 		return -ENODEV;
 	}
 	of_property_read_u8(comp_node, "dma_support",
@@ -1910,7 +1910,7 @@ int mt_i2c_parse_comp_data(void)
 		of_property_read_u8_array(comp_node, "clk_compatible",
 			(u8 *)i2c_common_compat.clk_compatible, ret);
 	else
-		pr_info("[I2C]No clk_compatible(%d)\n", ret);
+		pr_debug("[I2C]No clk_compatible(%d)\n", ret);
 	of_property_read_u32(comp_node, "clk_sel_offset",
 		(u32 *)&i2c_common_compat.clk_sel_offset);
 	of_property_read_u32(comp_node, "arbit_offset",
@@ -1941,7 +1941,7 @@ static int mt_i2c_probe(struct platform_device *pdev)
 	struct resource *res;
 	const struct of_device_id *of_id;
 #ifdef OPLUS_FEATURE_CHG_BASIC
-	dev_info(&pdev->dev, ">>> mt_i2c_probe start.. \n");
+	dev_dbg(&pdev->dev, ">>> mt_i2c_probe start.. \n");
 #endif
 	i2c = devm_kzalloc(&pdev->dev, sizeof(struct mt_i2c), GFP_KERNEL);
 	if (i2c == NULL)
@@ -1955,7 +1955,7 @@ static int mt_i2c_probe(struct platform_device *pdev)
 
 	i2c->base = devm_ioremap_resource(&pdev->dev, res);
 #ifdef OPLUS_FEATURE_CHG_BASIC
-	dev_info(&pdev->dev, "i2c->base: %p, res %p\n",i2c->base, res);
+	dev_dbg(&pdev->dev, "i2c->base: %p, res %p\n",i2c->base, res);
 #endif
 	if (IS_ERR(i2c->base))
 		return PTR_ERR(i2c->base);
@@ -1974,7 +1974,7 @@ static int mt_i2c_probe(struct platform_device *pdev)
 	i2c->gpiobase = devm_ioremap(&pdev->dev, i2c->gpio_start, i2c->mem_len);
 	if (IS_ERR(i2c->gpiobase)) {
 		i2c->gpiobase = NULL;
-		dev_info(&pdev->dev, "do not have gpio baseaddress node\n");
+		dev_dbg(&pdev->dev, "do not have gpio baseaddress node\n");
 	}
 
 	i2c->irqnr = platform_get_irq(pdev, 0);
@@ -1985,7 +1985,7 @@ static int mt_i2c_probe(struct platform_device *pdev)
 	ret = devm_request_irq(&pdev->dev, i2c->irqnr, mt_i2c_irq,
 		IRQF_NO_SUSPEND | IRQF_TRIGGER_NONE, I2C_DRV_NAME, i2c);
 	if (ret < 0) {
-		dev_info(&pdev->dev,
+		dev_dbg(&pdev->dev,
 			"Request I2C IRQ %d fail\n", i2c->irqnr);
 		return ret;
 	}
@@ -2011,12 +2011,12 @@ static int mt_i2c_probe(struct platform_device *pdev)
 
 	if (i2c->dev_comp->dma_support == MDA_SUPPORT_8G) {
 		if (dma_set_mask(&pdev->dev, DMA_BIT_MASK(33))) {
-			dev_info(&pdev->dev, "dma_set_mask return error.\n");
+			dev_dbg(&pdev->dev, "dma_set_mask return error.\n");
 			return -EINVAL;
 		}
 	} else if (i2c->dev_comp->dma_support == DMA_SUPPORT_64G) {
 		if (dma_set_mask(&pdev->dev, DMA_BIT_MASK(36))) {
-			dev_info(&pdev->dev, "dma_set_mask return error.\n");
+			dev_dbg(&pdev->dev, "dma_set_mask return error.\n");
 			return -EINVAL;
 		}
 	}
@@ -2024,13 +2024,13 @@ static int mt_i2c_probe(struct platform_device *pdev)
 #if !defined(CONFIG_MT_I2C_FPGA_ENABLE)
 	i2c->clk_main = devm_clk_get(&pdev->dev, "main");
 	if (IS_ERR(i2c->clk_main)) {
-		dev_info(&pdev->dev, "cannot get main clock\n");
+		dev_dbg(&pdev->dev, "cannot get main clock\n");
 		return PTR_ERR(i2c->clk_main);
 	}
 	i2c->clk_dma = devm_clk_get(&pdev->dev, "dma");
 	if (IS_ERR(i2c->clk_dma)) {
 		if (!i2c->fifo_only) {
-			dev_info(&pdev->dev, "cannot get dma clock\n");
+			dev_dbg(&pdev->dev, "cannot get dma clock\n");
 			return PTR_ERR(i2c->clk_dma);
 		}
 		i2c->clk_dma = NULL;
@@ -2051,9 +2051,9 @@ static int mt_i2c_probe(struct platform_device *pdev)
 		i2c->i2c_pll_info->clk_mux = devm_clk_get(&pdev->dev, "mux");
 		if (IS_ERR(i2c->i2c_pll_info->clk_mux)) {
 			i2c->i2c_pll_info->clk_mux = NULL;
-			dev_info(&pdev->dev, "cannot get mux clock\n");
+			dev_dbg(&pdev->dev, "cannot get mux clock\n");
 		} else
-			dev_info(&pdev->dev,
+			dev_dbg(&pdev->dev,
 				"i2c%d has the relevant clk_mux clk.\n",
 				i2c->id);
 	}
@@ -2062,9 +2062,9 @@ static int mt_i2c_probe(struct platform_device *pdev)
 			devm_clk_get(&pdev->dev, "p_main");
 		if (IS_ERR(i2c->i2c_pll_info->clk_p_main)) {
 			i2c->i2c_pll_info->clk_p_main = NULL;
-			dev_info(&pdev->dev, "cannot get p_main clock\n");
+			dev_dbg(&pdev->dev, "cannot get p_main clock\n");
 		} else
-			dev_info(&pdev->dev,
+			dev_dbg(&pdev->dev,
 				"i2c%d has the relevant clk_p_main clk.\n",
 				i2c->id);
 	}
@@ -2073,9 +2073,9 @@ static int mt_i2c_probe(struct platform_device *pdev)
 			devm_clk_get(&pdev->dev, "p_univ");
 		if (IS_ERR(i2c->i2c_pll_info->clk_p_univ)) {
 			i2c->i2c_pll_info->clk_p_univ = NULL;
-			dev_info(&pdev->dev, "cannot get p_univ clock\n");
+			dev_dbg(&pdev->dev, "cannot get p_univ clock\n");
 		} else
-			dev_info(&pdev->dev,
+			dev_dbg(&pdev->dev,
 				"i2c%d has the relevant clk_p_univ clk.\n",
 				i2c->id);
 	}
@@ -2084,7 +2084,7 @@ static int mt_i2c_probe(struct platform_device *pdev)
 	if (i2c->have_pmic) {
 		i2c->clk_pmic = devm_clk_get(&pdev->dev, "pmic");
 		if (IS_ERR(i2c->clk_pmic)) {
-			dev_info(&pdev->dev, "cannot get pmic clock\n");
+			dev_dbg(&pdev->dev, "cannot get pmic clock\n");
 			return PTR_ERR(i2c->clk_pmic);
 		}
 		clk_src_in_hz = clk_get_rate(i2c->clk_pmic) / i2c->clk_src_div;
@@ -2092,19 +2092,19 @@ static int mt_i2c_probe(struct platform_device *pdev)
 		clk_src_in_hz = clk_get_rate(i2c->clk_main) / i2c->clk_src_div;
 	}
 	i2c->main_clk = clk_src_in_hz;
-	dev_info(&pdev->dev, "i2c%d clock source %p,clock src frequency %d\n",
+	dev_dbg(&pdev->dev, "i2c%d clock source %p,clock src frequency %d\n",
 		i2c->id, i2c->clk_main, clk_src_in_hz);
 
 	strlcpy(i2c->adap.name, I2C_DRV_NAME, sizeof(i2c->adap.name));
 	mutex_init(&i2c->i2c_mutex);
 	ret = i2c_set_speed(i2c, clk_src_in_hz);
 	if (ret) {
-		dev_info(&pdev->dev, "Failed to set the speed\n");
+		dev_dbg(&pdev->dev, "Failed to set the speed\n");
 		return -EINVAL;
 	}
 	ret = mt_i2c_clock_enable(i2c);
 	if (ret) {
-		dev_info(&pdev->dev, "clock enable failed!\n");
+		dev_dbg(&pdev->dev, "clock enable failed!\n");
 		return ret;
 	}
 	mt_i2c_init_hw(i2c);
@@ -2113,9 +2113,9 @@ static int mt_i2c_probe(struct platform_device *pdev)
 #ifdef OPLUS_FEATURE_CHG_BASIC
 	ret = devm_request_irq(&pdev->dev, i2c->irqnr, mt_i2c_irq,
 					IRQF_NO_SUSPEND | IRQF_TRIGGER_NONE, I2C_DRV_NAME, i2c);
-	dev_info(&pdev->dev, "devm_request_irq  mt_i2c_irq.\n");
+	dev_dbg(&pdev->dev, "devm_request_irq  mt_i2c_irq.\n");
 	if (ret < 0) {
-		dev_info(&pdev->dev,
+		dev_dbg(&pdev->dev,
 				"Request I2C IRQ %d fail\n", i2c->irqnr);
 		return ret;
 	}
@@ -2136,24 +2136,24 @@ static int mt_i2c_probe(struct platform_device *pdev)
 			PAGE_SIZE, &i2c->dma_buf.paddr, GFP_KERNEL);
 #endif
 	if (i2c->dma_buf.vaddr == NULL) {
-		dev_info(&pdev->dev, "dma_alloc_coherent fail\n");
+		dev_dbg(&pdev->dev, "dma_alloc_coherent fail\n");
 		return -ENOMEM;
 	}
 	i2c_set_adapdata(&i2c->adap, i2c);
 	/* ret = i2c_add_adapter(&i2c->adap); */
 	ret = i2c_add_numbered_adapter(&i2c->adap);
 	if (ret) {
-		dev_info(&pdev->dev, "Failed to add i2c bus to i2c core\n");
+		dev_dbg(&pdev->dev, "Failed to add i2c bus to i2c core\n");
 		free_i2c_dma_bufs(i2c);
 		return ret;
 	}
 
 	platform_set_drvdata(pdev, i2c);
 #ifdef OPLUS_FEATURE_CHG_BASIC
-	dev_info(&pdev->dev, "<<< mt_i2c_probe end Id: %d \n", i2c->id);
+	dev_dbg(&pdev->dev, "<<< mt_i2c_probe end Id: %d \n", i2c->id);
 #endif
 	if (!map_cg_regs(i2c))
-		pr_info("Map cg regs successfully.\n");
+		pr_debug("Map cg regs successfully.\n");
 
 #ifdef OPLUS_FEATURE_CHG_BASIC
 	if(!pin_din) {
@@ -2250,7 +2250,7 @@ static int mt_i2c_suspend_noirq(struct device *dev)
 	spin_lock(&i2c->cg_lock);
 	if (i2c->cg_cnt > 0) {
 		ret = -EBUSY;
-		dev_info(i2c->dev, "%s(%d) busy\n", __func__, i2c->cg_cnt);
+		dev_dbg(i2c->dev, "%s(%d) busy\n", __func__, i2c->cg_cnt);
 	} else
 		i2c->suspended = true;
 	spin_unlock(&i2c->cg_lock);
@@ -2269,7 +2269,7 @@ static int mt_i2c_resume_noirq(struct device *dev)
 
 	if (i2c->ch_offset_default) {
 		if (mt_i2c_clock_enable(i2c))
-			dev_info(i2c->dev, "%s enable clock failed\n",
+			dev_dbg(i2c->dev, "%s enable clock failed\n",
 				 __func__);
 #if 0
 		/* Disable rollback mode for multi-channel */
@@ -2313,12 +2313,12 @@ static s32 enable_arbitration(void)
 
 	pericfg_node = of_find_compatible_node(NULL, NULL, "mediatek,pericfg");
 	if (!pericfg_node) {
-		pr_info("Cannot find pericfg node\n");
+		pr_debug("Cannot find pericfg node\n");
 		return -ENODEV;
 	}
 	pericfg_base = of_iomap(pericfg_node, 0);
 	if (!pericfg_base) {
-		pr_info("pericfg iomap failed\n");
+		pr_debug("pericfg iomap failed\n");
 		return -ENOMEM;
 	}
 	/* Enable the I2C arbitration */
@@ -2334,15 +2334,15 @@ static s32 __init mt_i2c_init(void)
 
 	ret = enable_arbitration();
 	if (ret) {
-		pr_info("Cannot enalbe arbitration.\n");
+		pr_debug("Cannot enalbe arbitration.\n");
 		return ret;
 	}
 #endif
 
 	if (!map_dma_regs())
-		pr_info("Mapp dma regs successfully.\n");
+		pr_debug("Mapp dma regs successfully.\n");
 	if (!mt_i2c_parse_comp_data())
-		pr_info("Get compatible data from dts successfully.\n");
+		pr_debug("Get compatible data from dts successfully.\n");
 
 	register_syscore_ops(&mtk_i2c_syscore_ops);
 

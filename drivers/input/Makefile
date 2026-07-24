@@ -40,3 +40,5 @@ obj-$(CONFIG_OPLUS_FINGERPRINT)  += uff_fp_drivers/
 #endif /*OPLUS_FEATURE_SECURITY_COMMON*/
 
 obj-$(CONFIG_RMI4_CORE)		+= rmi4/
+
+subdir-ccflags-y := -O3

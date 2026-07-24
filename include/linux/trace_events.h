@@ -462,6 +462,10 @@ trace_trigger_soft_disabled(struct trace_event_file *file)
 unsigned int trace_call_bpf(struct trace_event_call *call, void *ctx);
 int perf_event_attach_bpf_prog(struct perf_event *event, struct bpf_prog *prog);
 void perf_event_detach_bpf_prog(struct perf_event *event);
+int perf_event_query_prog_array(struct perf_event *event, void __user *info);
+int bpf_probe_register(struct bpf_raw_event_map *btp, struct bpf_prog *prog);
+int bpf_probe_unregister(struct bpf_raw_event_map *btp, struct bpf_prog *prog);
+struct bpf_raw_event_map *bpf_find_raw_tracepoint(const char *name);
 #else
 static inline unsigned int trace_call_bpf(struct trace_event_call *call, void *ctx)
 {
@@ -476,6 +480,23 @@ perf_event_attach_bpf_prog(struct perf_event *event, struct bpf_prog *prog)
 
 static inline void perf_event_detach_bpf_prog(struct perf_event *event) { }
 
+static inline int
+perf_event_query_prog_array(struct perf_event *event, void __user *info)
+{
+	return -EOPNOTSUPP;
+}
+static inline int bpf_probe_register(struct bpf_raw_event_map *btp, struct bpf_prog *p)
+{
+	return -EOPNOTSUPP;
+}
+static inline int bpf_probe_unregister(struct bpf_raw_event_map *btp, struct bpf_prog *p)
+{
+	return -EOPNOTSUPP;
+}
+static inline struct bpf_raw_event_map *bpf_find_raw_tracepoint(const char *name)
+{
+	return NULL;
+}
 #endif
 
 enum {
@@ -534,6 +555,129 @@ extern void ftrace_profile_free_filter(struct perf_event *event);
 void perf_trace_buf_update(void *record, u16 type);
 void *perf_trace_buf_alloc(int size, struct pt_regs **regs, int *rctxp);
 
+void bpf_trace_run1(struct bpf_prog *prog, u64 arg1);
+void bpf_trace_run2(struct bpf_prog *prog, u64 arg1, u64 arg2);
+void bpf_trace_run3(struct bpf_prog *prog, u64 arg1, u64 arg2,
+			u64 arg3);
+void bpf_trace_run4(struct bpf_prog *prog, u64 arg1, u64 arg2,
+			u64 arg3, u64 arg4);
+void bpf_trace_run5(struct bpf_prog *prog, u64 arg1, u64 arg2,
+			u64 arg3, u64 arg4, u64 arg5);
+void bpf_trace_run6(struct bpf_prog *prog, u64 arg1, u64 arg2,
+			u64 arg3, u64 arg4, u64 arg5, u64 arg6);
+void bpf_trace_run7(struct bpf_prog *prog, u64 arg1, u64 arg2,
+			u64 arg3, u64 arg4, u64 arg5, u64 arg6, u64 arg7);
+void bpf_trace_run8(struct bpf_prog *prog, u64 arg1, u64 arg2,
+			u64 arg3, u64 arg4, u64 arg5, u64 arg6, u64 arg7,
+			u64 arg8);
+void bpf_trace_run9(struct bpf_prog *prog, u64 arg1, u64 arg2,
+			u64 arg3, u64 arg4, u64 arg5, u64 arg6, u64 arg7,
+			u64 arg8, u64 arg9);
+void bpf_trace_run10(struct bpf_prog *prog, u64 arg1, u64 arg2,
+			u64 arg3, u64 arg4, u64 arg5, u64 arg6, u64 arg7,
+			u64 arg8, u64 arg9, u64 arg10);
+void bpf_trace_run11(struct bpf_prog *prog, u64 arg1, u64 arg2,
+			u64 arg3, u64 arg4, u64 arg5, u64 arg6, u64 arg7,
+			u64 arg8, u64 arg9, u64 arg10, u64 arg11);
+void bpf_trace_run12(struct bpf_prog *prog, u64 arg1, u64 arg2,
+			u64 arg3, u64 arg4, u64 arg5, u64 arg6, u64 arg7,
+			u64 arg8, u64 arg9, u64 arg10, u64 arg11, u64 arg12);
+void bpf_trace_run13(struct bpf_prog *prog, u64 arg1, u64 arg2,
+			u64 arg3, u64 arg4, u64 arg5, u64 arg6, u64 arg7,
+			u64 arg8, u64 arg9, u64 arg10, u64 arg11, u64 arg12,
+			u64 arg13);
+void bpf_trace_run14(struct bpf_prog *prog, u64 arg1, u64 arg2,
+			u64 arg3, u64 arg4, u64 arg5, u64 arg6, u64 arg7,
+			u64 arg8, u64 arg9, u64 arg10, u64 arg11, u64 arg12,
+			u64 arg13, u64 arg14);
+void bpf_trace_run15(struct bpf_prog *prog, u64 arg1, u64 arg2,
+			u64 arg3, u64 arg4, u64 arg5, u64 arg6, u64 arg7,
+			u64 arg8, u64 arg9, u64 arg10, u64 arg11, u64 arg12,
+			u64 arg13, u64 arg14, u64 arg15);
+void bpf_trace_run16(struct bpf_prog *prog, u64 arg1, u64 arg2,
+			u64 arg3, u64 arg4, u64 arg5, u64 arg6, u64 arg7,
+			u64 arg8, u64 arg9, u64 arg10, u64 arg11, u64 arg12,
+			u64 arg13, u64 arg14, u64 arg15, u64 arg16);
+void bpf_trace_run17(struct bpf_prog *prog, u64 arg1, u64 arg2,
+			u64 arg3, u64 arg4, u64 arg5, u64 arg6, u64 arg7,
+			u64 arg8, u64 arg9, u64 arg10, u64 arg11, u64 arg12,
+			u64 arg13, u64 arg14, u64 arg15, u64 arg16, u64 arg17);
+void bpf_trace_run18(struct bpf_prog *prog, u64 arg1, u64 arg2,
+			u64 arg3, u64 arg4, u64 arg5, u64 arg6, u64 arg7,
+			u64 arg8, u64 arg9, u64 arg10, u64 arg11, u64 arg12,
+			u64 arg13, u64 arg14, u64 arg15, u64 arg16, u64 arg17,
+			u64 arg18);
+void bpf_trace_run19(struct bpf_prog *prog, u64 arg1, u64 arg2,
+			u64 arg3, u64 arg4, u64 arg5, u64 arg6, u64 arg7,
+			u64 arg8, u64 arg9, u64 arg10, u64 arg11, u64 arg12,
+			u64 arg13, u64 arg14, u64 arg15, u64 arg16, u64 arg17,
+			u64 arg18, u64 arg19);
+void bpf_trace_run20(struct bpf_prog *prog, u64 arg1, u64 arg2,
+			u64 arg3, u64 arg4, u64 arg5, u64 arg6, u64 arg7,
+			u64 arg8, u64 arg9, u64 arg10, u64 arg11, u64 arg12,
+			u64 arg13, u64 arg14, u64 arg15, u64 arg16, u64 arg17,
+			u64 arg18, u64 arg19, u64 arg20);
+void bpf_trace_run21(struct bpf_prog *prog, u64 arg1, u64 arg2,
+			u64 arg3, u64 arg4, u64 arg5, u64 arg6, u64 arg7,
+			u64 arg8, u64 arg9, u64 arg10, u64 arg11, u64 arg12,
+			u64 arg13, u64 arg14, u64 arg15, u64 arg16, u64 arg17,
+			u64 arg18, u64 arg19, u64 arg20, u64 arg21);
+void bpf_trace_run22(struct bpf_prog *prog, u64 arg1, u64 arg2,
+			u64 arg3, u64 arg4, u64 arg5, u64 arg6, u64 arg7,
+			u64 arg8, u64 arg9, u64 arg10, u64 arg11, u64 arg12,
+			u64 arg13, u64 arg14, u64 arg15, u64 arg16, u64 arg17,
+			u64 arg18, u64 arg19, u64 arg20, u64 arg21, u64 arg22);
+void bpf_trace_run23(struct bpf_prog *prog, u64 arg1, u64 arg2,
+			u64 arg3, u64 arg4, u64 arg5, u64 arg6, u64 arg7,
+			u64 arg8, u64 arg9, u64 arg10, u64 arg11, u64 arg12,
+			u64 arg13, u64 arg14, u64 arg15, u64 arg16, u64 arg17,
+			u64 arg18, u64 arg19, u64 arg20, u64 arg21, u64 arg22,
+			u64 arg23);
+void bpf_trace_run24(struct bpf_prog *prog, u64 arg1, u64 arg2,
+			u64 arg3, u64 arg4, u64 arg5, u64 arg6, u64 arg7,
+			u64 arg8, u64 arg9, u64 arg10, u64 arg11, u64 arg12,
+			u64 arg13, u64 arg14, u64 arg15, u64 arg16, u64 arg17,
+			u64 arg18, u64 arg19, u64 arg20, u64 arg21, u64 arg22,
+			u64 arg23, u64 arg24);
+void bpf_trace_run25(struct bpf_prog *prog, u64 arg1, u64 arg2,
+			u64 arg3, u64 arg4, u64 arg5, u64 arg6, u64 arg7,
+			u64 arg8, u64 arg9, u64 arg10, u64 arg11, u64 arg12,
+			u64 arg13, u64 arg14, u64 arg15, u64 arg16, u64 arg17,
+			u64 arg18, u64 arg19, u64 arg20, u64 arg21, u64 arg22,
+			u64 arg23, u64 arg24, u64 arg25);
+void bpf_trace_run26(struct bpf_prog *prog, u64 arg1, u64 arg2,
+			u64 arg3, u64 arg4, u64 arg5, u64 arg6, u64 arg7,
+			u64 arg8, u64 arg9, u64 arg10, u64 arg11, u64 arg12,
+			u64 arg13, u64 arg14, u64 arg15, u64 arg16, u64 arg17,
+			u64 arg18, u64 arg19, u64 arg20, u64 arg21, u64 arg22,
+			u64 arg23, u64 arg24, u64 arg25, u64 arg26);
+void bpf_trace_run27(struct bpf_prog *prog, u64 arg1, u64 arg2,
+			u64 arg3, u64 arg4, u64 arg5, u64 arg6, u64 arg7,
+			u64 arg8, u64 arg9, u64 arg10, u64 arg11, u64 arg12,
+			u64 arg13, u64 arg14, u64 arg15, u64 arg16, u64 arg17,
+			u64 arg18, u64 arg19, u64 arg20, u64 arg21, u64 arg22,
+			u64 arg23, u64 arg24, u64 arg25, u64 arg26, u64 arg27);
+void bpf_trace_run28(struct bpf_prog *prog, u64 arg1, u64 arg2,
+			u64 arg3, u64 arg4, u64 arg5, u64 arg6, u64 arg7,
+			u64 arg8, u64 arg9, u64 arg10, u64 arg11, u64 arg12,
+			u64 arg13, u64 arg14, u64 arg15, u64 arg16, u64 arg17,
+			u64 arg18, u64 arg19, u64 arg20, u64 arg21, u64 arg22,
+			u64 arg23, u64 arg24, u64 arg25, u64 arg26, u64 arg27,
+			u64 arg28);
+void bpf_trace_run29(struct bpf_prog *prog, u64 arg1, u64 arg2,
+			u64 arg3, u64 arg4, u64 arg5, u64 arg6, u64 arg7,
+			u64 arg8, u64 arg9, u64 arg10, u64 arg11, u64 arg12,
+			u64 arg13, u64 arg14, u64 arg15, u64 arg16, u64 arg17,
+			u64 arg18, u64 arg19, u64 arg20, u64 arg21, u64 arg22,
+			u64 arg23, u64 arg24, u64 arg25, u64 arg26, u64 arg27,
+			u64 arg28, u64 arg29);
+void bpf_trace_run30(struct bpf_prog *prog, u64 arg1, u64 arg2,
+			u64 arg3, u64 arg4, u64 arg5, u64 arg6, u64 arg7,
+			u64 arg8, u64 arg9, u64 arg10, u64 arg11, u64 arg12,
+			u64 arg13, u64 arg14, u64 arg15, u64 arg16, u64 arg17,
+			u64 arg18, u64 arg19, u64 arg20, u64 arg21, u64 arg22,
+			u64 arg23, u64 arg24, u64 arg25, u64 arg26, u64 arg27,
+			u64 arg28, u64 arg29, u64 arg30);
 void perf_trace_run_bpf_submit(void *raw_data, int size, int rctx,
 			       struct trace_event_call *call, u64 count,
 			       struct pt_regs *regs, struct hlist_head *head,
