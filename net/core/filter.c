@@ -2499,7 +2499,7 @@ static const struct bpf_func_proto sk_skb_change_tail_proto = {
 static inline int __bpf_skb_change_head(struct sk_buff *skb, u32 head_room,
 					u64 flags)
 {
-	u32 max_len = BPF_SKB_MAX_LEN;
+	u32 max_len = __bpf_skb_max_len(skb);
 	u32 new_len = skb->len + head_room;
 	int ret;
 
