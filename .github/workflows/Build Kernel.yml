@@ -177,38 +177,43 @@ jobs:
         sed -i 's/is_slot_device=0;/is_slot_device=auto;/g' AnyKernel3/anykernel.sh
         cp android-kernel/out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
         rm -rf AnyKernel3/.git* AnyKernel3/README.md
-        
-    
-    
+
+        ZIP_NAME="${{ steps.gen_name.outputs.artifact_name }}.zip"
+        (cd AnyKernel3 && zip -r9 "../${ZIP_NAME}" .)
+        ls -lh "${ZIP_NAME}"
+
     - name: Upload AnyKernel3 artifact
       uses: actions/upload-artifact@v4
       with:
         name: ${{steps.gen_name.outputs.artifact_name}}
-        path: kernel_workspace/AnyKernel3/*
+        path: kernel_workspace/${{ steps.gen_name.outputs.artifact_name }}.zip
 
     - name: Generate Telegram caption
       id: gen_caption
       run: |
+
         COMMIT_SHA=$(git rev-parse --short HEAD)
         COMMIT_MSG=$(git log -1 --pretty=format:'%s')
-        echo "caption<<EOF" >> $GITHUB_OUTPUT
-        echo "<pre>" >> $GITHUB_OUTPUT
-        echo "🔧 Commit: ${COMMIT_SHA} - ${COMMIT_MSG}" >> $GITHUB_OUTPUT
-        echo "" >> $GITHUB_OUTPUT
-        echo "📦 Feature:" >> $GITHUB_OUTPUT
-        if [ "${{ github.event.inputs.BBR }}" = "true" ]; then
-          echo "✅ BBR" >> $GITHUB_OUTPUT
-        else
-          echo "❌ BBR" >> $GITHUB_OUTPUT
-        fi
-        if [ "${{ github.event.inputs.DroidSpace }}" = "true" ]; then
-          echo "✅ DroidSpace" >> $GITHUB_OUTPUT
-        else
-          echo "❌ DroidSpace" >> $GITHUB_OUTPUT
-        fi
-        echo "</pre>" >> $GITHUB_OUTPUT
-        echo "EOF" >> $GITHUB_OUTPUT
-      
+        {
+          echo "caption<<EOF"
+          echo "<pre>"
+          echo "🔧 Commit: ${COMMIT_SHA} - ${COMMIT_MSG}"
+          echo ""
+          echo "📦 Feature:"
+          if [ "${{ github.event.inputs.BBR }}" = "true" ]; then
+            echo "✅ BBR"
+          else
+            echo "❌ BBR"
+          fi
+          if [ "${{ github.event.inputs.DroidSpace }}" = "true" ]; then
+            echo "✅ DroidSpace"
+          else
+            echo "❌ DroidSpace"
+          fi
+          echo "</pre>"
+          echo "EOF"
+        } >> "$GITHUB_OUTPUT"
+
     - name: Upload to Telegram
       env:
           API_ID: ${{ secrets.API_ID }}
@@ -218,14 +223,21 @@ jobs:
           BOT_CI_SESSION: ${{ secrets.BOT_CI_SESSION }}
           CAPTION: ${{ steps.gen_caption.outputs.caption }}
       run: |
-        if [ "${{ github.event.inputs.TG }}" = "true" ]; then
-          echo "------------正在上传到Telegram------------"
-          pip3 install telethon
-          python3 .github/bot.py --caption "$CAPTION" \
-            "$GITHUB_WORKSPACE/kernel_workspace/${{ steps.gen_name.outputs.artifact_name }}.zip"
-        else
-          echo "------------跳过ing------------"
-          fi
+        if [ "${{ github.event.inputs.TG }}" != "true" ]; then
+          echo "------------跳过 Telegram 上传------------"
+          exit 0
+        fi
+
+        ZIP_PATH="$GITHUB_WORKSPACE/kernel_workspace/${{ steps.gen_name.outputs.artifact_name }}.zip"
+        if [ ! -f "$ZIP_PATH" ]; then
+          echo "找不到待上传文件: $ZIP_PATH"
+          ls -la "$GITHUB_WORKSPACE/kernel_workspace" || true
+          exit 1
+        fi
+
+        echo "------------正在上传到 Telegram------------"
+        pip3 install telethon
+        python3 "$GITHUB_WORKSPACE/.github/bot.py" --caption "$CAPTION" "$ZIP_PATH"
 
       
       
