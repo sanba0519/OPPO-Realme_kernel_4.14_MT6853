@@ -15,6 +15,13 @@ on:
         required: false
         default: false
 
+      SUSFS:
+        type: boolean
+        description: "是否加入 SUSFS"
+        required: false
+        default: false
+
+
       TG:
         type: boolean
         description: "!!!请勿开启!!!/Don't Open"
@@ -80,12 +87,14 @@ jobs:
         echo "KSU_LOG: 开始下载并应用 RKSU 官方 4.14 patch"
         
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
-
-        # 下载官方 patch
         wget https://github.com/rksuorg/kernel_patches/raw/master/manual_hook/kernel-4.14.patch -O ksu-4.14.patch || { echo "下载 patch 失败"; exit 1; }
-
-        # 应用 patch（-p1 是标准，忽略空格差异）
         patch -p1 < ksu-4.14.patch || { echo "patch 应用失败"; cat ksu-4.14.patch; exit 1; }
+
+         if [ "${{ github.event.inputs.SUSFS }}" = "true" ]; then
+          echo "KSU_LOG: 开启 SUSFS"
+          wget https://raw.githubusercontent.com/sanba0519/Kernel-patch/refs/heads/main/susfs_patch_to_4.14.patch -O susfs-4.14.patch
+          patch -p1 < susfs-4.14.patch || { echo "SUSFS patch 应用失败"; exit 1; }
+        fi
 
 
     - name: Setup KernelSU
@@ -166,6 +175,9 @@ jobs:
         if [ "${{ github.event.inputs.DroidSpace }}" = "true" ]; then
           NAME="${NAME}-DroidSpace"
         fi
+        if [ "${{ github.event.inputs.SUSFS }}" = "true" ]; then
+          NAME="${NAME}-SUSFS"
+        fi
         echo "artifact_name=${NAME}" >> $GITHUB_OUTPUT
                 
     - name: Package AnyKernel3
@@ -209,6 +221,11 @@ jobs:
             echo "✅ DroidSpace"
           else
             echo "❌ DroidSpace"
+          fi
+          if [ "${{ github.event.inputs.SUSFS }}" = "true" ]; then
+            echo "✅ SUSFS"
+          else
+            echo "❌ SUSFS"
           fi
           echo "</pre>"
           echo "EOF"
