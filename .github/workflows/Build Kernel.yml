@@ -103,25 +103,29 @@ jobs:
 
         elif [ "${{ github.event.inputs.SU }}" = "ReSukiSU" ]; then
           echo "KSU_LOG: 选择了 ReSukiSU"
-          echo "KSU_LOG: 开始下载并应用 ReSukiSU 官方 4.14 patch"
+          echo "KSU_LOG: 开始下载并应用 ReSukiSU 官方 4.14 manual hook patch"
+          wget -O resukisu-4.14.patch \
+              https://raw.githubusercontent.com/ReSukiSU/ReSukiSU_Patches/main/scope-minimized/kernel-4.14.patch \
+            || { echo "下载 ReSukiSU 官方 patch 失败"; exit 1; }
+          patch -p1 < resukisu-4.14.patch || { echo "ReSukiSU 官方 patch 应用失败"; cat resukisu-4.14.patch; exit 1; }
 
-          wget https://raw.githubusercontent.com/sanba0519/Kernel-patch/refs/heads/main/Resukisu-patch/stat%20hook.patch -O stat_hook.patch || { echo "下载 patch 失败"; exit 1; }
-          patch -p1 < stat_hook.patch || { echo "patch 应用失败"; cat stat_hook.patch; exit 1; }
-          wget https://raw.githubusercontent.com/sanba0519/Kernel-patch/refs/heads/main/Resukisu-patch/execve%20hook.patch -O execve_hook.patch || { echo "下载 patch 失败"; exit 1; }
-          patch -p1 < execve_hook.patch || { echo "patch 应用失败"; cat execve_hook.patch; exit 1; }
-          wget https://raw.githubusercontent.com/sanba0519/Kernel-patch/refs/heads/main/Resukisu-patch/faccessat%20hook.patch -O faccessat_hook.patch || { echo "下载 patch 失败"; exit 1; }
-          patch -p1 < faccessat_hook.patch || { echo "patch 应用失败"; cat faccessat_hook.patch; exit 1; }
-          wget https://raw.githubusercontent.com/sanba0519/Kernel-patch/refs/heads/main/Resukisu-patch/sys_reboot.patch -O sys_reboot.patch || { echo "下载 patch 失败"; exit 1; }
-          patch -p1 < sys_reboot.patch || { echo "patch 应用失败"; cat sys_reboot.patch; exit 1; }
-          
+          # 暂不使用 sanba0519/Kernel-patch 分片（格式曾有问题），需要时再打开：
+          # for name in "stat hook" "execve hook" "faccessat hook" "sys_reboot"; do
+          #   enc=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''${name}'''))")
+          #   out="${name// /_}.patch"
+          #   wget "https://raw.githubusercontent.com/sanba0519/Kernel-patch/refs/heads/main/Resukisu-patch/${enc}.patch" -O "$out" \
+          #     || { echo "下载 ${name}.patch 失败"; exit 1; }
+          #   sed -i 's/\r$//' "$out"
+          #   patch -p1 < "$out" || { echo "${name}.patch 应用失败"; cat "$out"; exit 1; }
+          # done
+
         else
           echo "KSU_LOG: 未知的 SU 选项，默认使用 RKSU"
         fi
-        
+
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
 
-
-         if [ "${{ github.event.inputs.SUSFS }}" = "true" ]; then
+        if [ "${{ github.event.inputs.SUSFS }}" = "true" ]; then
           echo "KSU_LOG: 开启 SUSFS"
           wget https://raw.githubusercontent.com/sanba0519/Kernel-patch/refs/heads/main/susfs_patch_to_4.14.patch -O susfs-4.14.patch
           patch -p1 < susfs-4.14.patch || { echo "SUSFS patch 应用失败"; exit 1; }
@@ -132,8 +136,19 @@ jobs:
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
         rm -rf KernelSU
-        curl -LSs "https://raw.githubusercontent.com/rsuntk/KernelSU/main/kernel/setup.sh" | bash -s main
-               
+        if [ "${{ github.event.inputs.SU }}" = "ReSukiSU" ]; then
+          echo "KSU_LOG: Setup ReSukiSU"
+          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s main
+          # Enable manual hook (required by the 4.14 scope-minimized patches)
+          if [ -f KernelSU/kernel/Kconfig ]; then
+            # Ensure CONFIG_KSU_MANUAL_HOOK exists / is default y if present in tree after setup
+            grep -n "KSU_MANUAL_HOOK\|Hooking Method\|KSU_MANUAL" KernelSU/kernel/Kconfig || true
+          fi
+        else
+          echo "KSU_LOG: Setup RKSU (rsuntk)"
+          curl -LSs "https://raw.githubusercontent.com/rsuntk/KernelSU/main/kernel/setup.sh" | bash -s main
+        fi
+
     - name: Setup ccache
       uses: hendrikmuhs/ccache-action@v1.2
       with:
@@ -184,6 +199,15 @@ jobs:
                 --disable CONFIG_USER_NS \
                 --enable CONFIG_DEVTMPFS_MOUNT
 
+        # ReSukiSU: force manual hook (4.14 has no GKI tracepoint redirect)
+        if [ "${{ github.event.inputs.SU }}" = "ReSukiSU" ]; then
+          echo "KSU_LOG: 启用 CONFIG_KSU + CONFIG_KSU_MANUAL_HOOK"
+          ./scripts/config --file out/.config \
+            --enable CONFIG_KSU \
+            --enable CONFIG_KSU_MANUAL_HOOK \
+            --disable CONFIG_KSU_TRACEPOINT_HOOK || true
+        fi
+
         make O=out ARCH=arm64 olddefconfig
 
         # 编译
@@ -199,7 +223,11 @@ jobs:
     - name: Generate artifact name
       id: gen_name
       run: |
-        NAME="MT6853-RKSU"
+        if [ "${{ github.event.inputs.SU }}" = "ReSukiSU" ]; then
+          NAME="MT6853-ReSukiSU"
+        else
+          NAME="MT6853-RKSU"
+        fi
         if [ "${{ github.event.inputs.BBR }}" = "true" ]; then
           NAME="${NAME}-BBR"
         fi
