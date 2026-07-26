@@ -3,6 +3,16 @@ name: RKSU for MT6853
 on:
   workflow_dispatch:
     inputs:
+
+      SU:
+        type: choice
+        description: "选择要使用的 Root 管理器"
+        required: true
+        default: RKSU
+        options:
+          - RKSU
+          - ReSukiSU
+
       BBR:
         type: boolean
         description: "是否启用 BBR 加速（不了解请不要启用）"
@@ -82,13 +92,34 @@ jobs:
         git clone -b "$CLONE_BRANCH" --single-branch https://github.com/sanba0519/OPPO-Realme_kernel_4.14_MT6853.git android-kernel
         cd android-kernel
 
-    - name: Apply RKSU patch
+    - name: Apply patch
       run: |
-        echo "KSU_LOG: 开始下载并应用 RKSU 官方 4.14 patch"
+        cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
+        if [ "${{ github.event.inputs.SU }}" = "RKSU" ]; then
+          echo "KSU_LOG: 选择了 RKSU"
+          echo "KSU_LOG: 开始下载并应用 RKSU 官方 4.14 patch"
+          wget https://github.com/rksuorg/kernel_patches/raw/master/manual_hook/kernel-4.14.patch -O ksu-4.14.patch || { echo "下载 patch 失败"; exit 1; }
+          patch -p1 < ksu-4.14.patch || { echo "patch 应用失败"; cat ksu-4.14.patch; exit 1; }
+
+        elif [ "${{ github.event.inputs.SU }}" = "ReSukiSU" ]; then
+          echo "KSU_LOG: 选择了 ReSukiSU"
+          echo "KSU_LOG: 开始下载并应用 ReSukiSU 官方 4.14 patch"
+
+          wget https://raw.githubusercontent.com/sanba0519/Kernel-patch/refs/heads/main/Resukisu-patch/stat%20hook.patch -O stat_hook.patch || { echo "下载 patch 失败"; exit 1; }
+          patch -p1 < stat_hook.patch || { echo "patch 应用失败"; cat stat_hook.patch; exit 1; }
+          wget https://raw.githubusercontent.com/sanba0519/Kernel-patch/refs/heads/main/Resukisu-patch/execve%20hook.patch -O execve_hook.patch || { echo "下载 patch 失败"; exit 1; }
+          patch -p1 < execve_hook.patch || { echo "patch 应用失败"; cat execve_hook.patch; exit 1; }
+          wget https://raw.githubusercontent.com/sanba0519/Kernel-patch/refs/heads/main/Resukisu-patch/faccessat%20hook.patch -O faccessat_hook.patch || { echo "下载 patch 失败"; exit 1; }
+          patch -p1 < faccessat_hook.patch || { echo "patch 应用失败"; cat faccessat_hook.patch; exit 1; }
+          wget https://raw.githubusercontent.com/sanba0519/Kernel-patch/refs/heads/main/Resukisu-patch/sys_reboot.patch -O sys_reboot.patch || { echo "下载 patch 失败"; exit 1; }
+          patch -p1 < sys_reboot.patch || { echo "patch 应用失败"; cat sys_reboot.patch; exit 1; }
+          
+        else
+          echo "KSU_LOG: 未知的 SU 选项，默认使用 RKSU"
+        fi
         
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
-        wget https://github.com/rksuorg/kernel_patches/raw/master/manual_hook/kernel-4.14.patch -O ksu-4.14.patch || { echo "下载 patch 失败"; exit 1; }
-        patch -p1 < ksu-4.14.patch || { echo "patch 应用失败"; cat ksu-4.14.patch; exit 1; }
+
 
          if [ "${{ github.event.inputs.SUSFS }}" = "true" ]; then
           echo "KSU_LOG: 开启 SUSFS"
@@ -211,6 +242,9 @@ jobs:
           echo "<pre>"
           echo "🔧 Commit: ${COMMIT_SHA} - ${COMMIT_MSG}"
           echo ""
+          echo "欧加真MT6853通用内核--A12"
+          echo ""
+          echo "Oplus/Realme MT6853 Universal Kernel -- A12"
           echo "📦 Feature:"
           if [ "${{ github.event.inputs.BBR }}" = "true" ]; then
             echo "✅ BBR"
