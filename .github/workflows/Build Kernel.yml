@@ -109,16 +109,6 @@ jobs:
             || { echo "下载 ReSukiSU 官方 patch 失败"; exit 1; }
           patch -p1 < resukisu-4.14.patch || { echo "ReSukiSU 官方 patch 应用失败"; cat resukisu-4.14.patch; exit 1; }
 
-          # 暂不使用 sanba0519/Kernel-patch 分片（格式曾有问题），需要时再打开：
-          # for name in "stat hook" "execve hook" "faccessat hook" "sys_reboot"; do
-          #   enc=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''${name}'''))")
-          #   out="${name// /_}.patch"
-          #   wget "https://raw.githubusercontent.com/sanba0519/Kernel-patch/refs/heads/main/Resukisu-patch/${enc}.patch" -O "$out" \
-          #     || { echo "下载 ${name}.patch 失败"; exit 1; }
-          #   sed -i 's/\r$//' "$out"
-          #   patch -p1 < "$out" || { echo "${name}.patch 应用失败"; cat "$out"; exit 1; }
-          # done
-
         else
           echo "KSU_LOG: 未知的 SU 选项，默认使用 RKSU"
         fi
