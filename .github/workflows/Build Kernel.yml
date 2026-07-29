@@ -46,6 +46,7 @@ on:
         options:
           - main
           - rebpf
+          - feat/SUSFS
 
     
 jobs:
