@@ -118,7 +118,7 @@ jobs:
 
         if [ "${{ github.event.inputs.SUSFS }}" = "true" ]; then
           echo "KSU_LOG: 开启 SUSFS"
-          wget https://raw.githubusercontent.com/sanba0519/Kernel-patch/refs/heads/main/susfs_patch_to_4.14.patch -O susfs-4.14.patch
+          wget https://raw.githubusercontent.com/sanba0519/Kernel-patch/refs/heads/main/USeless/susfs_patch_to_4.14-bak.patch -O susfs-4.14.patch
           patch -p1 < susfs-4.14.patch || { echo "SUSFS patch 应用失败"; exit 1; }
         fi
 
