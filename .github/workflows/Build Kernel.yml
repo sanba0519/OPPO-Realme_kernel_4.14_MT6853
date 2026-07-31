@@ -307,10 +307,10 @@ jobs:
             echo "❌ SUSFS-V2.2.0"
           fi
           echo "</pre>"
-          echo "EOF"
           echo " "
           echo "Follow👉:@mt6853o"
           echo "Dev: @sanba_0519"
+          echo "EOF"
         } >> "$GITHUB_OUTPUT"
 
     - name: Upload to Telegram
