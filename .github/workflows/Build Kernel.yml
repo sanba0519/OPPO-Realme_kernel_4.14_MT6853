@@ -38,15 +38,14 @@ on:
         required: false
         default: false
 
-      Branch:
-        type: choice
-        description: "选择要 clone 的分支（仅供开发者选择）"
-        required: false
-        default: main
-        options:
-          - main
-          - rebpf
-          - feat/SUSFS
+      #Branch:
+      #  type: choice
+      #  description: "选择要 clone 的分支（仅供开发者选择）"
+      #  required: false
+      #  default: main
+      #  options:
+      #    - main
+      #    - rebpf
 
     
 jobs:
@@ -282,10 +281,17 @@ jobs:
           echo "<pre>"
           echo "🔧 Commit: ${COMMIT_SHA} - ${COMMIT_MSG}"
           echo ""
-          echo "欧加真MT6853通用内核--A12"
+          echo "Kernel Info:"
           echo ""
+          echo "欧加真我 MT6853 通用内核 -- A12"
           echo "Oplus/Realme MT6853 Universal Kernel -- A12"
+          echo ""
           echo "📦 Feature:"
+          if [ "${{ github.event.inputs.SU }}" = "RKSU" ]; then
+            echo "✅ RKSU"
+          else
+            echo "✅ ReSukiSU"
+          fi
           if [ "${{ github.event.inputs.BBR }}" = "true" ]; then
             echo "✅ BBR"
           else
@@ -297,12 +303,15 @@ jobs:
             echo "❌ DroidSpace"
           fi
           if [ "${{ github.event.inputs.SUSFS }}" = "true" ]; then
-            echo "✅ SUSFS"
+            echo "✅ SUSFS-V2.2.0"
           else
-            echo "❌ SUSFS"
+            echo "❌ SUSFS-V2.2.0"
           fi
           echo "</pre>"
           echo "EOF"
+          echo " "
+          echo "Follow👉:@mt6853o"
+          echo "Dev: @sanba_0519"
         } >> "$GITHUB_OUTPUT"
 
     - name: Upload to Telegram
