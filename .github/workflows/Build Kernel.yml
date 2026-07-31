@@ -1,4 +1,4 @@
-name: RKSU for MT6853
+name: Build Kernel for MT6853
 
 on:
   workflow_dispatch:
