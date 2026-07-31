@@ -38,14 +38,13 @@ on:
         required: false
         default: false
 
-      #Branch:
-      #  type: choice
-      #  description: "选择要 clone 的分支（仅供开发者选择）"
-      #  required: false
-      #  default: main
-      #  options:
-      #    - main
-      #    - rebpf
+      Branch:
+        type: choice
+        description: "选择要 clone 的分支（仅供开发者选择）"
+        required: true
+        default: main
+        options:
+          - main
 
     
 jobs:
