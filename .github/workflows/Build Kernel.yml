@@ -162,8 +162,7 @@ jobs:
         export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang-aosp/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc64/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc32/bin:$PATH
         export ARCH=arm64
         export SUBARCH=arm64
-        export KBUILD_BUILD_HOST=coolapk@sanba
-        export KBUILD_BUILD_USER=GitHub@sanba0519
+
 
         # 首先生成初始 .config（无论选项如何都必须执行）
         make -j$(nproc --all) O=out ARCH=arm64 mt6853-ss_defconfig
