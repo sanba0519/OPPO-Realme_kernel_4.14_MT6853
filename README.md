@@ -65,4 +65,3 @@ TO DO:
   <img src="https://contrib.rocks/image?repo=sanba0519/OPPO-Realme_kernel_4.14_MT6853" />
 </a>
 
-Made with [contrib.rocks](https://contrib.rocks).
