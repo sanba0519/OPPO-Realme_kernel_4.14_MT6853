@@ -55,6 +55,10 @@ TO DO:
 
 ***
 ## 鸣谢
+[RKSU](https://github.com/rsuntk/KernelSU) 一个专门为`no-GIK`内核的KSU分支
+
+[ReSukiSU](https://github.com/ReSukiSU/ReSukiSU) SukiSU Ultra的分支
+
 [NonGKI_Kernel_Build_2nd](https://github.com/JackA1ltman/NonGKI_Kernel_Build_2nd) 一个专注于No-GKI内核编译的项目
 
 [android_kernel_oplus_mt6853](https://github.com/momo54181/android_kernel_oplus_mt6853) 感谢momo佬的帮助
