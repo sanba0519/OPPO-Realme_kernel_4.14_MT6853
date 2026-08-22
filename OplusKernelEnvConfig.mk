@@ -15,7 +15,12 @@
 ### ------------------------------------------------------------------------------
 ##################################################################################
 
+ifneq ($(wildcard ../out/oplus_native_features.mk),)
 -include ../out/oplus_native_features.mk
+else
+# Standalone kernel builds keep the feature manifest in the source tree.
+-include $(srctree)/oplus_native_features.mk
+endif
 
 ###ifdef OPLUS_ARCH_INJECT
 OPLUS_CONNECTIVITY_NATIVE_FEATURE_SET :=

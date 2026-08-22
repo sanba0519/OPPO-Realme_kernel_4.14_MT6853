@@ -44,9 +44,9 @@ void mm_fb_kevent_add_module(u32 pid, char* module) {
 		return;
 	}
 
+	spin_lock(&mm_slock);
 	for (i = 0; i < MM_KEVENT_MODULE_SIZE_MAX; i++) {
 		if ((!mm_modules[i].pid) || (!strcmp(mm_modules[i].modl, module))) {
-			spin_lock(&mm_slock);
 			mm_modules[i].pid = pid;
 			memcpy(mm_modules[i].modl, module, len);
 			mm_modules[i].modl[len] = 0x0;
@@ -54,6 +54,7 @@ void mm_fb_kevent_add_module(u32 pid, char* module) {
 			return;
 		}
 	}
+	spin_unlock(&mm_slock);
 
 	return;
 }
@@ -61,16 +62,21 @@ void mm_fb_kevent_add_module(u32 pid, char* module) {
 /* record connect pid and modules*/
 int mm_fb_kevent_get_pid(char* module) {
 	int i = 0;
+	int pid;
 
 	if (!module) {
 		return MM_KEVENT_BAD_VALUE;
 	}
 
+	spin_lock(&mm_slock);
 	for (i = 0; i < MM_KEVENT_MODULE_SIZE_MAX; i++) {
 		if (!strcmp(mm_modules[i].modl, module)) {
-			return mm_modules[i].pid;
+			pid = mm_modules[i].pid;
+			spin_unlock(&mm_slock);
+			return pid;
 		}
 	}
+	spin_unlock(&mm_slock);
 
 	return MM_KEVENT_BAD_VALUE;
 }
@@ -78,8 +84,6 @@ int mm_fb_kevent_get_pid(char* module) {
 static int mm_fb_kevent_send_module(struct sk_buff *skb,
 	struct genl_info *info)
 {
-	struct sk_buff *skbu = NULL;
-	struct nlmsghdr *nlh;
 	struct nlattr *na = NULL;
 	char *pmesg = NULL;
 
@@ -90,32 +94,29 @@ static int mm_fb_kevent_send_module(struct sk_buff *skb,
 		return -1;
 	}
 
-	skbu = skb_get(skb);
-	if (!skbu) {
-		pr_err("mm_kevent: skb_get result is null error\n");
+	if (!skb || !info || !info->attrs) {
+		pr_err("mm_kevent: invalid generic netlink request\n");
 		return -1;
 	}
 
 	if (info->attrs[MM_FB_CMD_ATTR_MSG]) {
 		na = info->attrs[MM_FB_CMD_ATTR_MSG];
-		nlh = nlmsg_hdr(skbu);
+		if (!nla_len(na) || nla_len(na) > MM_KEVENT_MODULE_LEN_MAX - 1)
+			return -EINVAL;
+
 		pmesg = (char*)kmalloc(nla_len(na) + 0x10, GFP_KERNEL);
 		if (pmesg) {
 			memcpy(pmesg, nla_data(na), nla_len(na));
 			pmesg[nla_len(na)] = 0x0;
 			pr_info("mm_kevent: nla_len(na) %d, pid %d, module: %s\n",
-					nla_len(na), nlh->nlmsg_pid, pmesg);
-			mm_fb_kevent_add_module(nlh->nlmsg_pid, pmesg);
+				nla_len(na), info->snd_portid, pmesg);
+			mm_fb_kevent_add_module(info->snd_portid, pmesg);
 		}
 	}
 
 	if (pmesg) {
 		kfree(pmesg);
 	}
-	if (skbu) {
-		kfree_skb(skbu);
-	}
-
 	return 0;
 }
 
@@ -128,7 +129,6 @@ EXPORT_SYMBOL(mm_fb_kevent_set_recv_user);
 static int mm_fb_kevent_test_upload(struct sk_buff *skb,
 	struct genl_info *info)
 {
-	struct sk_buff *skbu = NULL;
 	struct nlattr *na = NULL;
 	char *pmesg = NULL;
 
@@ -139,9 +139,8 @@ static int mm_fb_kevent_test_upload(struct sk_buff *skb,
 		return -1;
 	}
 
-	skbu = skb_get(skb);
-	if (!skbu) {
-		pr_err("mm_kevent: skb_get result is null error\n");
+	if (!skb || !info || !info->attrs) {
+		pr_err("mm_kevent: invalid generic netlink request\n");
 		return -1;
 	}
 
@@ -169,10 +168,6 @@ static int mm_fb_kevent_test_upload(struct sk_buff *skb,
 		if (pmesg) {
 			kfree(pmesg);
 		}
-	}
-
-	if (skbu) {
-		kfree_skb(skbu);
 	}
 
 	return 0;
@@ -317,4 +312,3 @@ module_exit(mm_fb_kevent_module_exit);
 MODULE_DESCRIPTION("mm_kevent@1.0");
 MODULE_VERSION("1.0");
 MODULE_LICENSE("GPL v2");
-
