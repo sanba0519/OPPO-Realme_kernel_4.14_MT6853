@@ -51,7 +51,7 @@ on:
 jobs:
   build:
 
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     permissions:
       contents: write
       packages: read
@@ -230,7 +230,14 @@ jobs:
                 CLANG_TRIPLE=aarch64-linux-gnu- \
                 CROSS_COMPILE=aarch64-linux-android- \
                 CROSS_COMPILE_ARM32=arm-linux-androideabi- \
-                LD=ld.lld
+                CFLAGS_KERNEL="-fintegrated-as" \
+                CFLAGS_MODULE="-fintegrated-as" \
+                LD=ld.lld \
+                AR=llvm-ar \
+                NM=llvm-nm \
+                OBJCOPY=llvm-objcopy \
+                OBJDUMP=llvm-objdump \
+                STRIP=llvm-strip
 
     - name: Generate artifact name
       id: gen_name
