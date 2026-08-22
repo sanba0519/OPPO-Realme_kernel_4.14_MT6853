@@ -45,6 +45,7 @@ on:
         default: main
         options:
           - main
+          - Dependency-clang19
 
     
 jobs:
@@ -79,9 +80,10 @@ jobs:
     - name: Download Clang toolchain
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace
-        mkdir clang-aosp
-        git clone -q --depth=1 https://github.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-6443078 -b 10.0 clang-aosp
-    
+        mkdir -p clang-aosp
+        curl -L --fail --retry 3 \
+          'https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r536225.tar.gz' \
+          | tar -xz -C clang-aosp
     
     - name: Clone kernel source
       run: |
