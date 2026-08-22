@@ -594,7 +594,7 @@ dma_addr_t cmdq_pkt_get_curr_buf_pa(struct cmdq_pkt *pkt)
 
 	if (unlikely(!pkt->avail_buf_size))
 		if (cmdq_pkt_add_cmd_buffer(pkt) < 0)
-			return -ENOMEM;
+			return ERR_PTR(-ENOMEM);
 
 	buf = list_last_entry(&pkt->buf, typeof(*buf), list_entry);
 
@@ -608,7 +608,7 @@ void *cmdq_pkt_get_curr_buf_va(struct cmdq_pkt *pkt)
 
 	if (unlikely(!pkt->avail_buf_size))
 		if (cmdq_pkt_add_cmd_buffer(pkt) < 0)
-			return -ENOMEM;
+			return ERR_PTR(-ENOMEM);
 
 	buf = list_last_entry(&pkt->buf, typeof(*buf), list_entry);
 
@@ -1222,7 +1222,7 @@ s32 cmdq_pkt_poll_timeout(struct cmdq_pkt *pkt, u32 value, u8 subsys,
 	/* assign temp spr as empty, shoudl fill in end addr later */
 	if (unlikely(!pkt->avail_buf_size))
 		if (cmdq_pkt_add_cmd_buffer(pkt) < 0)
-			return -ENOMEM;
+			return ERR_PTR(-ENOMEM);
 	end_addr_mark = pkt->cmd_buf_size;
 	cmdq_pkt_assign_command(pkt, reg_tmp, 0);
 
