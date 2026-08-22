@@ -194,7 +194,8 @@ jobs:
                 --enable CONFIG_NAMESPACES \
                 --enable CONFIG_DEVTMPFS \
                 --disable CONFIG_USER_NS \
-                --enable CONFIG_DEVTMPFS_MOUNT
+                --enable CONFIG_DEVTMPFS_MOUNT \
+                --enable CONFIG_SECTION_MISMATCH_WARN_ONLY
 
         # ReSukiSU: SUSFS selects the inline hook method; otherwise use manual hooks.
         if [ "${{ github.event.inputs.SU }}" = "ReSukiSU" ]; then
