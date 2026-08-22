@@ -77,13 +77,9 @@ jobs:
         wget -O gcc-arm.tar.gz https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/+archive/refs/tags/android-12.1.0_r27.tar.gz
         tar -C gcc32/ -zxvf gcc-arm.tar.gz
     
-    - name: Download Clang toolchain
+    - name: Install Clang toolchain
       run: |
-        cd $GITHUB_WORKSPACE/kernel_workspace
-        mkdir -p clang-aosp
-        curl -L --fail --retry 3 \
-          'https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r536225.tar.gz' \
-          | tar -xz -C clang-aosp
+        sudo apt install -y clang lld llvm
     
     - name: Clone kernel source
       run: |
@@ -161,7 +157,7 @@ jobs:
     - name: Configure and build kernel
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
-        export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang-aosp/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc64/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc32/bin:$PATH
+        export PATH=$GITHUB_WORKSPACE/kernel_workspace/gcc64/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc32/bin:$PATH
         export ARCH=arm64
         export SUBARCH=arm64
         export KBUILD_BUILD_HOST=coolapk@sanba
