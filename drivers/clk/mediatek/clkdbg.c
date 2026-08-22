@@ -467,7 +467,7 @@ static bool pvdck_pwr_is_on(struct provider_clk *pvdck, u32 *spm_pwr_status, int
 	struct clk_hw *c_hw = __clk_get_hw(c);
 
 	if (array_size == 1)
-		return clk_hw_pwr_sta_is_on(c_hw, spm_pwr_status, pvdck);
+		return clk_hw_pwr_sta_is_on(c_hw, *spm_pwr_status, pvdck);
 
 	return clk_hw_pwr_is_on(c_hw, spm_pwr_status, pvdck);
 }
@@ -2020,7 +2020,7 @@ static void show_save_point(struct save_point *sp)
 static void store_save_point(struct save_point *sp)
 {
 	save_pwr_status(sp->spm_pwr_status);
-	save_all_clks_state(sp->clks_states, sp->spm_pwr_status);
+	save_all_clks_state(sp->clks_states, &sp->spm_pwr_status);
 
 #if CLKDBG_PM_DOMAIN
 	save_all_genpd_state(sp->genpd_states, sp->genpd_dev_states);
