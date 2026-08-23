@@ -50,7 +50,7 @@ on:
 jobs:
   build:
 
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     permissions:
       contents: write
       packages: read
@@ -61,7 +61,7 @@ jobs:
     - name: Setup build environment
       run: |
         sudo apt-get update
-        sudo -E apt-get -y -qq install git make bc bison ccache openssl dos2unix zip kmod cpio flex libelf-dev curl libssl-dev libtfm-dev wget device-tree-compiler ca-certificates python3 python2 binutils binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi
+        sudo -E apt-get -y -qq install git make bc bison ccache openssl dos2unix zip kmod cpio flex libelf-dev curl libssl-dev libtfm-dev wget device-tree-compiler ca-certificates python3 binutils binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi
         mkdir -p $GITHUB_WORKSPACE/kernel_workspace
 
     - name: Download GCC toolchain
@@ -76,12 +76,9 @@ jobs:
         wget -O gcc-arm.tar.gz https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/+archive/refs/tags/android-12.1.0_r27.tar.gz
         tar -C gcc32/ -zxvf gcc-arm.tar.gz
     
-    - name: Download Clang toolchain
+    - name: Install Clang toolchain
       run: |
-        cd $GITHUB_WORKSPACE/kernel_workspace
-        mkdir clang-aosp
-        git clone -q --depth=1 https://github.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-6443078 -b 10.0 clang-aosp
-    
+        sudo apt install -y clang lld llvm
     
     - name: Clone kernel source
       run: |
@@ -159,7 +156,7 @@ jobs:
     - name: Configure and build kernel
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
-        export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang-aosp/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc64/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc32/bin:$PATH
+        export PATH=$GITHUB_WORKSPACE/kernel_workspace/gcc64/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc32/bin:$PATH
         export ARCH=arm64
         export SUBARCH=arm64
         export KBUILD_BUILD_HOST=coolapk@sanba
@@ -197,7 +194,8 @@ jobs:
                 --enable CONFIG_NAMESPACES \
                 --enable CONFIG_DEVTMPFS \
                 --disable CONFIG_USER_NS \
-                --enable CONFIG_DEVTMPFS_MOUNT
+                --enable CONFIG_DEVTMPFS_MOUNT \
+                --enable CONFIG_SECTION_MISMATCH_WARN_ONLY
 
         # ReSukiSU: SUSFS selects the inline hook method; otherwise use manual hooks.
         if [ "${{ github.event.inputs.SU }}" = "ReSukiSU" ]; then
@@ -228,7 +226,14 @@ jobs:
                 CLANG_TRIPLE=aarch64-linux-gnu- \
                 CROSS_COMPILE=aarch64-linux-android- \
                 CROSS_COMPILE_ARM32=arm-linux-androideabi- \
-                LD=ld.lld
+                CFLAGS_KERNEL="-fintegrated-as" \
+                CFLAGS_MODULE="-fintegrated-as" \
+                LD=ld.lld \
+                AR=llvm-ar \
+                NM=llvm-nm \
+                OBJCOPY=llvm-objcopy \
+                OBJDUMP=llvm-objdump \
+                STRIP=llvm-strip
 
     - name: Generate artifact name
       id: gen_name
