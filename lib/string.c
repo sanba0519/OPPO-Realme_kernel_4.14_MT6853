@@ -96,6 +96,23 @@ char *strcpy(char *dest, const char *src)
 EXPORT_SYMBOL(strcpy);
 #endif
 
+#ifndef __HAVE_ARCH_STPCPY
+/**
+ * stpcpy - Copy a C-string and return pointer to end
+ * @dest: Where to copy the string to
+ * @src: Where to copy the string from
+ *
+ * Returns a pointer to the terminating null byte in dest.
+ */
+char *stpcpy(char *dest, const char *src)
+{
+	while ((*dest++ = *src++) != '\0')
+		/* nothing */;
+	return dest - 1;
+}
+EXPORT_SYMBOL(stpcpy);
+#endif
+
 #ifndef __HAVE_ARCH_STRNCPY
 /**
  * strncpy - Copy a length-limited, C-string
