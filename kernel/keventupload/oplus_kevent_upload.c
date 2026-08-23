@@ -30,7 +30,7 @@
 #ifdef CONFIG_OPLUS_KEVENT_UPLOAD
 
 static struct sock *netlink_fd = NULL;
-static volatile u32 kevent_pid;
+static u32 kevent_pid;
 
 /* send to user space */
 int kevent_send_to_user(struct kernel_packet_info *userinfo)
@@ -41,7 +41,10 @@ int kevent_send_to_user(struct kernel_packet_info *userinfo)
 	struct nlmsghdr *nlh;
 	struct kernel_packet_info *packet;
 
-	/* protect payload too long problem*/
+	if (!userinfo || !netlink_fd || !READ_ONCE(kevent_pid))
+		return -ENOTCONN;
+
+	/* Protect against an oversized user supplied payload. */
 	if (userinfo->payload_length >= 2048) {
 		printk(KERN_ERR "kevent_send_to_user: payload_length out of range\n");
 		return -1;
@@ -88,7 +91,8 @@ int kevent_send_to_user(struct kernel_packet_info *userinfo)
 	NETLINK_CB(skbuff).dst_group = 0;
 
 	/* send data */
-	ret = netlink_unicast(netlink_fd, skbuff, kevent_pid, MSG_DONTWAIT);
+	ret = netlink_unicast(netlink_fd, skbuff, READ_ONCE(kevent_pid),
+				     MSG_DONTWAIT);
 	if(ret < 0){
 		//printk(KERN_ERR "kevent_send_to_user:netlink_unicast: can not unicast skbuff\n");
 		printk(KERN_ERR "kevent_send_to_user:netlink_unicast: can not unicast skbuff, ret is %d \n", ret);
@@ -103,20 +107,26 @@ EXPORT_SYMBOL(kevent_send_to_user);
 /* kernel receive message from user space */
 void kernel_kevent_receive(struct sk_buff *__skbbr)
 {
-	struct sk_buff *skbu;
-	struct nlmsghdr *nlh = NULL;
+	struct nlmsghdr *nlh;
+	u32 portid;
 
-	skbu = skb_get(__skbbr);
+	if (!__skbbr || __skbbr->len < sizeof(*nlh))
+		return;
 
-	if (skbu->len >= sizeof(struct nlmsghdr)) {
-		nlh = (struct nlmsghdr *)skbu->data;
-		if((nlh->nlmsg_len >= sizeof(struct nlmsghdr))
-			&& (__skbbr->len >= nlh->nlmsg_len)){
-			kevent_pid = nlh->nlmsg_pid;
-			printk(KERN_ERR "[KEVENT_UPLOAD]kevent_pid is %u ..\n", kevent_pid);
-		}
-	}
-	kfree_skb(skbu);
+	nlh = nlmsg_hdr(__skbbr);
+	if (nlh->nlmsg_len < sizeof(*nlh) ||
+	    nlh->nlmsg_len > __skbbr->len)
+		return;
+
+	/* NETLINK_CB is populated by the core and cannot be spoofed in the
+	 * message payload.  The old code trusted nlmsg_pid and retained a
+	 * reference to an skb which the netlink core owns. */
+	portid = NETLINK_CB(__skbbr).portid;
+	if (!portid)
+		return;
+
+	WRITE_ONCE(kevent_pid, portid);
+	pr_debug("[KEVENT_UPLOAD] kevent_pid is %u\n", portid);
 }
 
 int __init netlink_kevent_init(void)
@@ -136,7 +146,11 @@ int __init netlink_kevent_init(void)
 
 void __exit netlink_kevent_exit(void)
 {
-	sock_release(netlink_fd->sk_socket);
+	WRITE_ONCE(kevent_pid, 0);
+	if (netlink_fd) {
+		sock_release(netlink_fd->sk_socket);
+		netlink_fd = NULL;
+	}
 }
 
 module_init(netlink_kevent_init);
@@ -144,4 +158,3 @@ module_exit(netlink_kevent_exit);
 MODULE_LICENSE("GPL");
 
 #endif /* CONFIG_OPLUS_KEVENT_UPLOAD */
-

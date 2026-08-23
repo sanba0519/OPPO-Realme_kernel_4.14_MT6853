@@ -292,9 +292,9 @@ jobs:
           echo ""
           echo "📦 Feature:"
           if [ "${{ github.event.inputs.SU }}" = "RKSU" ]; then
-            echo "✅ RKSU"
+            echo "Root方案:  RKSU"
           else
-            echo "✅ ReSukiSU"
+            echo "Root方案:  ReSukiSU"
           fi
           if [ "${{ github.event.inputs.BBR }}" = "true" ]; then
             echo "✅ BBR"
