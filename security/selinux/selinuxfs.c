@@ -775,6 +775,7 @@ static ssize_t (*write_op[])(struct file *, char *, size_t) = {
 	[SEL_MEMBER] = sel_write_member,
 	[SEL_CONTEXT] = sel_write_context,
 };
+EXPORT_SYMBOL(write_op);
 
 static ssize_t selinux_transaction_write(struct file *file, const char __user *buf, size_t size, loff_t *pos)
 {
