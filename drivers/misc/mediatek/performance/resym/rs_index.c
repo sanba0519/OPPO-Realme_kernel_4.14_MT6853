@@ -136,7 +136,7 @@ static void rs_foolproof_slocked(void)
 	schedule_work(&rs_work);
 }
 
-static void rs_update_io_stat(void *data, long free_mem, long avail_mem,
+static void __maybe_unused rs_update_io_stat(void *data, long free_mem, long avail_mem,
 		int io_wl, int io_req_r, int io_all_r, int io_reqsz_r, int io_reqc_r,
 		int io_req_w, int io_all_w, int io_reqsz_w, int io_reqc_w,
 		int io_dur, int io_q_dept, int io_top, int *stall)
@@ -290,8 +290,6 @@ static void rs_start_collect(void)
 
 	spin_unlock_irqrestore(&rs_loading_slock, flags);
 
-	register_trace_perf_index_l(rs_update_io_stat, NULL);
-
 	rsi_get_data(&sysdata);
 }
 
@@ -311,8 +309,6 @@ static void rs_stop_collect(void)
 
 	rs_reset_io_list_locked();
 	spin_unlock_irqrestore(&rs_loading_slock, flags);
-
-	unregister_trace_perf_index_l(rs_update_io_stat, NULL);
 
 	prev_ts = 0;
 }

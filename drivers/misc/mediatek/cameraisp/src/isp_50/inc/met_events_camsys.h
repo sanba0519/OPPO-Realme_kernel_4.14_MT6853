@@ -126,5 +126,7 @@ TRACE_EVENT(ISP__Pass1_CAM_leave,
 #define TRACE_INCLUDE_PATH ./inc
 #undef TRACE_INCLUDE_FILE
 #define TRACE_INCLUDE_FILE met_events_camsys
+/* 此文件 tracepoint 超过 bpf_probe.h 的 12 参数上限，跳过 BPF probe 实例化 */
+#define __TRACE_NO_BPF_PROBE
 #include <trace/define_trace.h>
 

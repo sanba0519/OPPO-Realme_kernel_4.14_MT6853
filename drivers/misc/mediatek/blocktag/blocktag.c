@@ -261,7 +261,7 @@ static int mtk_btag_get_schedtune_cgrp_id(struct task_struct *t)
 	grp = task_cgroup(t, schedtune_cgrp_id);
 	rcu_read_unlock();
 
-	return grp->id;
+	return grp->kn->id;
 }
 
 #define TOP_APP_GROUP_ID (4)

@@ -32,6 +32,9 @@ config HAVE_DYNAMIC_FTRACE
 config HAVE_DYNAMIC_FTRACE_WITH_REGS
 	bool
 
+config HAVE_DYNAMIC_FTRACE_WITH_DIRECT_CALLS
+	bool
+
 config HAVE_FTRACE_MCOUNT_RECORD
 	bool
 	help
@@ -517,6 +520,11 @@ config DYNAMIC_FTRACE_WITH_REGS
 	depends on DYNAMIC_FTRACE
 	depends on HAVE_DYNAMIC_FTRACE_WITH_REGS
 
+config DYNAMIC_FTRACE_WITH_DIRECT_CALLS
+	def_bool y
+	depends on DYNAMIC_FTRACE
+	depends on HAVE_DYNAMIC_FTRACE_WITH_DIRECT_CALLS
+
 config FUNCTION_PROFILER
 	bool "Kernel function profiler"
 	depends on FUNCTION_TRACER
@@ -530,6 +538,17 @@ config FUNCTION_PROFILER
 	  have been hit and their counters.
 
 	  If in doubt, say N.
+
+config BPF_KPROBE_OVERRIDE
+	bool "Enable BPF programs to override a kprobed function"
+	depends on BPF_EVENTS
+	depends on KPROBES_ON_FTRACE
+	depends on FUNCTION_ERROR_INJECTION
+	depends on DYNAMIC_FTRACE_WITH_REGS
+	default n
+	help
+	 Allows BPF to override the execution of a probed function and
+	 set a different return value.  This is used for error injection.
 
 config FTRACE_MCOUNT_RECORD
 	def_bool y

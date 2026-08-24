@@ -458,11 +458,8 @@ static int dump_tasks_info(bool verbose)
 		}
 
 		/* consolidate page table accounting */
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 19, 0))
-		tsk_nr_ptes = PTRS_PER_PTE * sizeof(pte_t) * atomic_long_read(&tsk->mm->nr_ptes);
-#else
+
 		tsk_nr_ptes = mm_pgtables_bytes(tsk->mm);
-#endif
 		task_state = task_state_to_char(tsk);
 		/* check whether we have freezed a task. */
 		frozen_mark = frozen(tsk) ? '*' : ' ';

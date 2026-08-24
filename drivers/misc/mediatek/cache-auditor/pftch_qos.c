@@ -207,7 +207,7 @@ void pftch_qos_tick(int cpu)
 		if (!event || event->state != PERF_EVENT_STATE_ACTIVE)
 			continue;
 
-		ret = perf_event_read_local(event, &counter);
+		ret = perf_event_read_local(event, &counter, NULL, NULL);
 		cp_stats->counters[i] = (counter - cp_stats->prev_counters[i])
 			* 1000000000/delta;
 		cp_stats->prev_counters[i] = counter;

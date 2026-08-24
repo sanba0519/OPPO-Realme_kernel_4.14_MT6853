@@ -269,6 +269,7 @@ static int aee_kpd_enable = 0;
 #endif /*CONFIG_MACH_MT6768*/
 int kpd_klog_en;
 void __iomem *kp_base;
+
 static unsigned int kp_irqnr;
 struct input_dev *kpd_input_dev;
 static struct dentry *kpd_droot;

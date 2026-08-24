@@ -59,8 +59,7 @@ extern __read_mostly unsigned int sysctl_sched_nr_migrate;
 extern __read_mostly unsigned int sysctl_sched_time_avg;
 
 int sched_proc_update_handler(struct ctl_table *table, int write,
-		void __user *buffer, size_t *length,
-		loff_t *ppos);
+		void *buffer, size_t *length, loff_t *ppos);
 #endif
 
 /*
@@ -83,9 +82,8 @@ extern unsigned int sysctl_sched_cfs_bandwidth_slice;
 
 #ifdef CONFIG_SCHED_TUNE
 extern int stune_task_threshold;
-extern int sched_stune_task_threshold_handler(struct ctl_table *table,
-					int write, void __user *buffer,
-					size_t *length, loff_t *ppos);
+int sched_stune_task_threshold_handler(struct ctl_table *table, int write,
+      void *buffer, size_t *length, loff_t *ppos);
 #endif
 
 #ifdef CONFIG_SCHED_AUTOGROUP
@@ -95,27 +93,22 @@ extern unsigned int sysctl_sched_autogroup_enabled;
 extern int sysctl_sched_rr_timeslice;
 extern int sched_rr_timeslice;
 
-extern int sched_rr_handler(struct ctl_table *table, int write,
-		void __user *buffer, size_t *lenp,
-		loff_t *ppos);
+int sched_rr_handler(struct ctl_table *table, int write, void *buffer,
+		size_t *lenp, loff_t *ppos);
 
-extern int sched_rt_handler(struct ctl_table *table, int write,
-		void __user *buffer, size_t *lenp,
-		loff_t *ppos);
+int sched_rt_handler(struct ctl_table *table, int write, void *buffer,
+		size_t *lenp, loff_t *ppos);
 
 #ifdef CONFIG_UCLAMP_TASK
-extern int sched_uclamp_handler(struct ctl_table *table, int write,
-				void __user *buffer, size_t *lenp,
-				loff_t *ppos);
+int sched_uclamp_handler(struct ctl_table *table, int write, void *buffer,
+        size_t *lenp, loff_t *ppos);
 #endif
 
-extern int sysctl_numa_balancing(struct ctl_table *table, int write,
-				 void __user *buffer, size_t *lenp,
-				 loff_t *ppos);
+int sysctl_numa_balancing(struct ctl_table *table, int write,void *buffer,
+        size_t *lenp, loff_t *ppos);
 
-extern int sysctl_schedstats(struct ctl_table *table, int write,
-				 void __user *buffer, size_t *lenp,
-				 loff_t *ppos);
+int sysctl_schedstats(struct ctl_table *table, int write, void *buffer,
+		size_t *lenp, loff_t *ppos);
 
 #ifdef OPLUS_FEATURE_SCHED_ASSIST
 extern int sysctl_sched_assist_scene_handler(struct ctl_table *table, int write,

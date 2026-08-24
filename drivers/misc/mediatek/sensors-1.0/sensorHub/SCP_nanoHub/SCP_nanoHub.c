@@ -547,7 +547,7 @@ static int SCP_sensorHub_direct_push_work(void *data)
 		if (ret)
 			continue;
 		WRITE_ONCE(chre_kthread_wait_condition, false);
-		mark_timestamp(0, WORK_START, ktime_get_boot_ns(), 0);
+		mark_timestamp(0, WORK_START, ktime_get_boottime_ns(), 0);
 		SCP_sensorHub_read_wp_queue();
 	}
 	return 0;
@@ -642,7 +642,7 @@ static void SCP_sensorHub_moving_average(union SCP_SENSOR_HUB_DATA *rsp)
 		if (READ_ONCE(rtc_compensation_suspend))
 			return;
 	}
-	ap_now_time = ktime_get_boot_ns();
+	ap_now_time = ktime_get_boottime_ns();
 	arch_counter = arch_counter_get_cntvct();
 	scp_raw_time = rsp->notify_rsp.scp_timestamp;
 	ipi_transfer_time = arch_counter_to_ns(arch_counter -
@@ -663,7 +663,7 @@ static void SCP_sensorHub_notify_cmd(union SCP_SENSOR_HUB_DATA *rsp,
 	switch (rsp->notify_rsp.event) {
 	case SCP_DIRECT_PUSH:
 	case SCP_FIFO_FULL:
-		mark_timestamp(0, GOT_IPI, ktime_get_boot_ns(), 0);
+		mark_timestamp(0, GOT_IPI, ktime_get_boottime_ns(), 0);
 		mark_ipi_timestamp(arch_counter_get_cntvct() -
 			rsp->notify_rsp.arch_counter);
 #ifdef DEBUG_PERFORMANCE_HW_TICK
@@ -1289,7 +1289,7 @@ static int sensor_send_timestamp_wake_locked(void)
 
 	/* send_timestamp_to_hub is process context, disable irq is safe */
 	local_irq_disable();
-	now_time = ktime_get_boot_ns();
+	now_time = ktime_get_boottime_ns();
 	arch_counter = arch_counter_get_cntvct();
 	local_irq_enable();
 	req.set_config_req.sensorType = 0;
@@ -1372,7 +1372,7 @@ int sensor_enable_to_hub(uint8_t handle, int enabledisable)
 		mSensorState[sensor_type].enable = enabledisable;
 		if (enabledisable)
 			atomic64_set(&mSensorState[sensor_type].enableTime,
-							ktime_get_boot_ns());
+							ktime_get_boottime_ns());
 		init_sensor_config_cmd(&cmd, sensor_type);
 		if (atomic_read(&power_status) == SENSOR_POWER_UP) {
 			ret = nanohub_external_write((const uint8_t *)&cmd,
@@ -2535,12 +2535,12 @@ static int sensorHub_pm_event(struct notifier_block *notifier,
 {
 	switch (pm_event) {
 	case PM_POST_SUSPEND:
-		pr_debug("resume ap boottime=%lld\n", ktime_get_boot_ns());
+		pr_debug("resume ap boottime=%lld\n", ktime_get_boottime_ns());
 		WRITE_ONCE(rtc_compensation_suspend, false);
 		sensor_send_timestamp_to_hub();
 		return NOTIFY_DONE;
 	case PM_SUSPEND_PREPARE:
-		pr_debug("suspend ap boottime=%lld\n", ktime_get_boot_ns());
+		pr_debug("suspend ap boottime=%lld\n", ktime_get_boottime_ns());
 		WRITE_ONCE(rtc_compensation_suspend, true);
 		return NOTIFY_DONE;
 	default:

@@ -893,6 +893,20 @@ void rebuild_sched_domains(void)
 	cpuset_sched_change_end();
 }
 
+static int update_cpus_allowed(struct cpuset *cs, struct task_struct *p,
+							   const struct cpumask *new_mask)
+{
+	int ret;
+
+	if (cpumask_subset(&p->cpus_requested, cs->cpus_requested)) {
+		ret = set_cpus_allowed_ptr(p, &p->cpus_requested);
+		if (!ret)
+			return ret;
+	}
+
+	return set_cpus_allowed_ptr(p, new_mask);
+}
+
 /**
  * update_tasks_cpumask - Update the cpumasks of tasks in the cpuset.
  * @cs: the cpuset in which each task's cpus_allowed mask needs to be changed
@@ -908,7 +922,7 @@ static void update_tasks_cpumask(struct cpuset *cs)
 
 	css_task_iter_start(&cs->css, 0, &it);
 	while ((task = css_task_iter_next(&it)))
-		set_cpus_allowed_ptr(task, cs->effective_cpus);
+		update_cpus_allowed(cs, task, cs->effective_cpus);
 	css_task_iter_end(&it);
 }
 
@@ -1878,7 +1892,7 @@ static void cpuset_attach(struct cgroup_taskset *tset)
 		 * can_attach beforehand should guarantee that this doesn't
 		 * fail.  TODO: have a better way to handle failure here
 		 */
-		WARN_ON_ONCE(set_cpus_allowed_ptr(task, cpus_attach));
+		WARN_ON_ONCE(update_cpus_allowed(cs, task, cpus_attach));
 
 		cpuset_change_task_nodemask(task, &cpuset_attach_nodemask_to);
 		cpuset_update_task_spread_flag(cs, task);
@@ -2749,7 +2763,7 @@ void set_user_space_global_cpuset(struct cpumask *global_cpus, int cgroup_id)
 		struct cpuset *parent;
 
 		if (cs == &top_cpuset || !css_tryget_online(&cs->css) ||
-			(cgroup_id != 0 && cs->css.cgroup->id != cgroup_id))
+			(cgroup_id != 0 && cs->css.cgroup->kn->id != cgroup_id))
 			continue;
 
 		parent = parent_cs(cs);
@@ -2785,11 +2799,11 @@ void set_user_space_global_cpuset(struct cpumask *global_cpus, int cgroup_id)
 		WARN_ON(!is_in_v2_mode() &&
 			!cpumask_equal(cs->cpus_allowed, cs->effective_cpus));
 
-		//printk_deferred("[name:global_cpuset&]final set:0x%lx cgroup:",
-		//		cs->effective_cpus->bits[0]);
-		printk_deferred("[name:global_cpuset&]final set:0x%lx cgroup: %s, id:%d\n",
-				cs->effective_cpus->bits[0],cs->css.cgroup->kn->name,
-				cs->css.cgroup->id);
+		printk_deferred("[name:global_cpuset&]final set:0x%lx cgroup:",
+				cs->effective_cpus->bits[0]);
+		printk_deferred("%s, id:%d\n",
+				cs->css.cgroup->kn->name,
+				cs->css.cgroup->kn->id);
 
 		/* use cs->effective_cpus to update cs cpumask */
 		update_tasks_cpumask(cs);
@@ -2837,7 +2851,7 @@ void unset_user_space_global_cpuset(int cgroup_id)
 		struct cpuset *parent;
 
 		if (cs == &top_cpuset || !css_tryget_online(&cs->css) ||
-			(cgroup_id != 0 && cs->css.cgroup->id != cgroup_id))
+			(cgroup_id != 0 && cs->css.cgroup->kn->id != cgroup_id))
 			continue;
 
 		parent = parent_cs(cs);
@@ -2871,7 +2885,7 @@ void unset_user_space_global_cpuset(int cgroup_id)
 		printk_deferred("[name:global_cpuset&]final unset:  0x%lx cgroup:%s, id:%d\n",
 				cs->effective_cpus->bits[0],
 				cs->css.cgroup->kn->name,
-				cs->css.cgroup->id);
+				cs->css.cgroup->kn->id);
 		pr_cont_cgroup_name(cs->css.cgroup);
 		//printk_deferred("\n");
 

@@ -680,7 +680,6 @@ config MACH_MT6833
 	select DEVAPC_MT6833
 	select DEVMPU_MT6833
 	select MTK_DBGTOP
-	select MTK_PID_MAP
 	select MTK_CM_MGR
 	select MTK_CPU_KORO
 	select MTK_SDA

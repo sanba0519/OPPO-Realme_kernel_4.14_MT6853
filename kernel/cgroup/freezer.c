@@ -17,37 +17,24 @@
 #include <linux/export.h>
 #include <linux/slab.h>
 #include <linux/cgroup.h>
-#include <linux/fs.h>
-#include <linux/uaccess.h>
-#include <linux/freezer.h>
-#include <linux/seq_file.h>
-#include <linux/mutex.h>
+#include <linux/sched.h>
+#include <linux/sched/task.h>
+#include <linux/sched/signal.h>
 
-/*
- * A cgroup is freezing if any FREEZING flags are set.  FREEZING_SELF is
- * set if "FROZEN" is written to freezer.state cgroupfs file, and cleared
- * for "THAWED".  FREEZING_PARENT is set if the parent freezer is FREEZING
- * for whatever reason.  IOW, a cgroup has FREEZING_PARENT set if one of
- * its ancestors has FREEZING_SELF set.
- */
-enum freezer_state_flags {
-	CGROUP_FREEZER_ONLINE	= (1 << 0), /* freezer is fully online */
-	CGROUP_FREEZING_SELF	= (1 << 1), /* this freezer is freezing */
-	CGROUP_FREEZING_PARENT	= (1 << 2), /* the parent freezer is freezing */
-	CGROUP_FROZEN		= (1 << 3), /* this and its descendants frozen */
+#include "cgroup-internal.h"
+#include <trace/events/cgroup.h>
+/* css_set_lock protects both task and descendant completion counters. */
+static bool cgroup_freezer_complete(const struct cgroup *cgrp)
+{
+	lockdep_assert_held(&css_set_lock);
 
-	/* mask for all FREEZING flags */
-	CGROUP_FREEZING		= CGROUP_FREEZING_SELF | CGROUP_FREEZING_PARENT,
-};
+	return test_bit(CGRP_FREEZE, &cgrp->flags) &&
+	       cgrp->freezer.nr_frozen_tasks == __cgroup_task_count(cgrp) &&
+	       cgrp->freezer.nr_frozen_descendants == cgrp->nr_descendants;
+}
 
-struct freezer {
-	struct cgroup_subsys_state	css;
-	unsigned int			state;
-};
-
-static DEFINE_MUTEX(freezer_mutex);
-
-static inline struct freezer *css_freezer(struct cgroup_subsys_state *css)
+/* Propagate a cgroup's frozen state towards the root. */
+static void cgroup_propagate_frozen(struct cgroup *cgrp, bool frozen)
 {
 	return css ? container_of(css, struct freezer, css) : NULL;
 }

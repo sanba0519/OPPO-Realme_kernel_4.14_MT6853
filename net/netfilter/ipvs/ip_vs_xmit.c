@@ -266,6 +266,8 @@ static inline bool decrement_ttl(struct netns_ipvs *ipvs,
 
 		/* check and decrement ttl */
 		if (ipv6_hdr(skb)->hop_limit <= 1) {
+			struct inet6_dev *idev = __in6_dev_get_safely(skb->dev);
+
 			/* Force OUTPUT device used as source address */
 			skb->dev = dst->dev;
 			icmpv6_send(skb, ICMPV6_TIME_EXCEED,

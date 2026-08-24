@@ -69,9 +69,7 @@ static int memory_monitor_show(struct seq_file *m, void *p)
 	unsigned long start = 0, rcu_lock_end = 0, end = 0, task_lock_start = 0,
 			task_lock_end = 0, task_lock_time = 0, gpu_read_time = 0, gpu_read_start = 0;
 	int i = 0;
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4,19,0)
-	unsigned long ptes, pmds;
-#endif
+	
 	seq_printf(m, "-------------------------------------------------------\n");
 	seq_printf(m, "memory monitor[node_version:2] for ns\n");
 	seq_printf(m, "-------------------------------------------------------\n");
@@ -115,14 +113,8 @@ static int memory_monitor_show(struct seq_file *m, void *p)
 		memcpy(pmem[record_tasks].comm, tsk->comm, TASK_COMM_LEN);
 		pmem[record_tasks].oom_score_adj = tsk->signal->oom_score_adj;
 		pmem[record_tasks].rss = get_mm_rss(tsk->mm)<<2;
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4,19,0)
-		ptes = PTRS_PER_PTE * sizeof(pte_t) * atomic_long_read(&tsk->mm->nr_ptes);
-		pmds = PTRS_PER_PMD * sizeof(pmd_t) * mm_nr_pmds(tsk->mm);
-		pmem[record_tasks].rss += (ptes + pmds) >> 10;
-#else
 #ifdef CONFIG_MMU
 		pmem[record_tasks].rss += atomic_long_read(&tsk->mm->pgtables_bytes) >> 10;
-#endif
 #endif
 		pmem[record_tasks].rssfile = get_mm_counter(tsk->mm, MM_FILEPAGES) << 2;
 		pmem[record_tasks].swapents_ori = get_mm_counter(tsk->mm, MM_SWAPENTS) << 2;

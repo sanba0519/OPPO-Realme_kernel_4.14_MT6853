@@ -380,7 +380,7 @@ static int vrf_finish_output6(struct net *net, struct sock *sk,
 		neigh = __neigh_create(&nd_tbl, nexthop, dst->dev, false);
 	if (!IS_ERR(neigh)) {
 		sock_confirm_neigh(skb, neigh);
-		ret = neigh_output(neigh, skb);
+		ret = neigh_output(neigh, skb, false);
 		rcu_read_unlock_bh();
 		return ret;
 	}
@@ -562,7 +562,7 @@ static int vrf_finish_output(struct net *net, struct sock *sk, struct sk_buff *s
 	struct net_device *dev = dst->dev;
 	unsigned int hh_len = LL_RESERVED_SPACE(dev);
 	struct neighbour *neigh;
-	u32 nexthop;
+	bool is_v6gw = false;
 	int ret = -EINVAL;
 
 	nf_reset(skb);
@@ -585,13 +585,11 @@ static int vrf_finish_output(struct net *net, struct sock *sk, struct sk_buff *s
 
 	rcu_read_lock_bh();
 
-	nexthop = (__force u32)rt_nexthop(rt, ip_hdr(skb)->daddr);
-	neigh = __ipv4_neigh_lookup_noref(dev, nexthop);
-	if (unlikely(!neigh))
-		neigh = __neigh_create(&arp_tbl, &nexthop, dev, false);
+	neigh = ip_neigh_for_gw(rt, skb, &is_v6gw);
 	if (!IS_ERR(neigh)) {
 		sock_confirm_neigh(skb, neigh);
-		ret = neigh_output(neigh, skb);
+		/* if crossing protocols, can not use the cached header */
+		ret = neigh_output(neigh, skb, is_v6gw);
 		rcu_read_unlock_bh();
 		return ret;
 	}
@@ -947,6 +945,7 @@ static struct rt6_info *vrf_ip6_route_lookup(struct net *net,
 					     const struct net_device *dev,
 					     struct flowi6 *fl6,
 					     int ifindex,
+					     const struct sk_buff *skb,
 					     int flags)
 {
 	struct net_vrf *vrf = netdev_priv(dev);
@@ -965,7 +964,7 @@ static struct rt6_info *vrf_ip6_route_lookup(struct net *net,
 	if (!table)
 		return NULL;
 
-	return ip6_pol_route(net, table, ifindex, fl6, flags);
+	return ip6_pol_route(net, table, ifindex, fl6, skb, flags);
 }
 
 static void vrf_ip6_input_dst(struct sk_buff *skb, struct net_device *vrf_dev,
@@ -983,7 +982,7 @@ static void vrf_ip6_input_dst(struct sk_buff *skb, struct net_device *vrf_dev,
 	struct net *net = dev_net(vrf_dev);
 	struct rt6_info *rt6;
 
-	rt6 = vrf_ip6_route_lookup(net, vrf_dev, &fl6, ifindex,
+	rt6 = vrf_ip6_route_lookup(net, vrf_dev, &fl6, ifindex, skb,
 				   RT6_LOOKUP_F_HAS_SADDR | RT6_LOOKUP_F_IFACE);
 	if (unlikely(!rt6))
 		return;
@@ -1116,7 +1115,7 @@ static struct dst_entry *vrf_link_scope_lookup(const struct net_device *dev,
 	if (!ipv6_addr_any(&fl6->saddr))
 		flags |= RT6_LOOKUP_F_HAS_SADDR;
 
-	rt = vrf_ip6_route_lookup(net, dev, fl6, fl6->flowi6_oif, flags);
+	rt = vrf_ip6_route_lookup(net, dev, fl6, fl6->flowi6_oif, NULL, flags);
 	if (rt)
 		dst = &rt->dst;
 
@@ -1151,6 +1150,7 @@ static inline size_t vrf_fib_rule_nl_size(void)
 	sz  = NLMSG_ALIGN(sizeof(struct fib_rule_hdr));
 	sz += nla_total_size(sizeof(u8));	/* FRA_L3MDEV */
 	sz += nla_total_size(sizeof(u32));	/* FRA_PRIORITY */
+	sz += nla_total_size(sizeof(u8));       /* FRA_PROTOCOL */
 
 	return sz;
 }
@@ -1180,6 +1180,9 @@ static int vrf_fib_rule(const struct net_device *dev, __u8 family, bool add_it)
 	memset(frh, 0, sizeof(*frh));
 	frh->family = family;
 	frh->action = FR_ACT_TO_TBL;
+
+	if (nla_put_u8(skb, FRA_PROTOCOL, RTPROT_KERNEL))
+		goto nla_put_failure;
 
 	if (nla_put_u8(skb, FRA_L3MDEV, 1))
 		goto nla_put_failure;

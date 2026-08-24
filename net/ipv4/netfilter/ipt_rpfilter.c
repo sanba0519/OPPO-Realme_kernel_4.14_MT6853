@@ -51,7 +51,7 @@ static bool rpfilter_lookup_reverse(struct net *net, struct flowi4 *fl4,
 	for (ret = 0; ret < res.fi->fib_nhs; ret++) {
 		struct fib_nh *nh = &res.fi->fib_nh[ret];
 
-		if (nh->nh_dev == dev) {
+		if (nh->fib_nh_dev == dev) {
 			dev_match = true;
 			break;
 		}
@@ -106,7 +106,7 @@ static int rpfilter_check(const struct xt_mtchk_param *par)
 	const struct xt_rpfilter_info *info = par->matchinfo;
 	unsigned int options = ~XT_RPFILTER_OPTION_MASK;
 	if (info->flags & options) {
-		pr_info("unknown options encountered");
+		pr_info_ratelimited("unknown options\n");
 		return -EINVAL;
 	}
 

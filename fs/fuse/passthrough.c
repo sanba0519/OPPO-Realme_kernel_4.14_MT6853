@@ -37,8 +37,8 @@ static void fuse_file_accessed(struct file *dst_file, struct file *src_file)
 	dst_inode = file_inode(dst_file);
 	src_inode = file_inode(src_file);
 
-	if ((!timespec_equal(&dst_inode->i_mtime, &src_inode->i_mtime) ||
-	     !timespec_equal(&dst_inode->i_ctime, &src_inode->i_ctime))) {
+	if ((!timespec64_equal(&dst_inode->i_mtime, &src_inode->i_mtime) ||
+	     !timespec64_equal(&dst_inode->i_ctime, &src_inode->i_ctime))) {
 		dst_inode->i_mtime = src_inode->i_mtime;
 		dst_inode->i_ctime = src_inode->i_ctime;
 	}

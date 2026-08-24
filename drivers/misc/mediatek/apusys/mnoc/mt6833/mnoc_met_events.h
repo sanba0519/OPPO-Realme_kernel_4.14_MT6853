@@ -141,4 +141,6 @@ TRACE_EVENT(mnoc_excep,
 #define TRACE_INCLUDE_PATH .
 #undef TRACE_INCLUDE_FILE
 #define TRACE_INCLUDE_FILE mnoc_met_events
+/* 此文件 tracepoint 超过 bpf_probe.h 的 12 参数上限，跳过 BPF probe 实例化 */
+#define __TRACE_NO_BPF_PROBE
 #include <trace/define_trace.h>

@@ -196,6 +196,15 @@
  *	Returns 0 if @name and @value have been successfully set,
  *	-EOPNOTSUPP if no security attribute is needed, or
  *	-ENOMEM on memory allocation failure.
+ * @inode_init_security_anon:
+ *      Set up the incore security field for the new anonymous inode
+ *      and return whether the inode creation is permitted by the security
+ *      module or not.
+ *      @inode contains the inode structure
+ *      @name name of the anonymous inode class
+ *      @context_inode optional related inode
+ *	Returns 0 on success, -EACCES if the security module denies the
+ *	creation of this inode, or another -errno upon other errors.
  * @inode_create:
  *	Check permission to create a regular file.
  *	@dir contains inode structure of the parent of the new file.
@@ -429,6 +438,15 @@
  *	to abort the copy up. Note that the caller is responsible for reading
  *	and writing the xattrs as this hook is merely a filter.
  *
+ * Security hooks for kernfs node operations
+ *
+ * @kernfs_init_security:
+ *	Initialize the security context of a newly created kernfs node based
+ *	on its own and its parent's attributes.
+ *
+ *	@kn_dir the parent kernfs node
+ *	@kn the new child kernfs node
+ *
  * Security hooks for file operations
  *
  * @file_permission:
@@ -554,6 +572,10 @@
  *	@new points to the new credentials.
  *	@old points to the original credentials.
  *	Transfer data from original creds to new creds
+ * @cred_getsecid:
+ *	Retrieve the security identifier of the cred structure @c
+ *	@c contains the credentials, secid will be placed into @secid.
+ *	In case of failure, @secid will be set to zero.
  * @kernel_act_as:
  *	Set the credentials for a kernel service to act as (subjective context).
  *	@new points to the credentials to be modified.
@@ -572,6 +594,10 @@
  *	userspace to load a kernel module with the given name.
  *	@kmod_name name of the module requested by the kernel
  *	Return 0 if successful.
+ * @kernel_load_data:
+ *	Load data provided by userspace.
+ *	@id kernel load data identifier
+ *	Return 0 if permission is granted.
  * @kernel_read_file:
  *	Read a file specified by userspace.
  *	@file contains the file structure pointing to the file being read
@@ -672,7 +698,8 @@
  *	@p contains the task_struct for process.
  *	@info contains the signal information.
  *	@sig contains the signal value.
- *	@secid contains the sid of the process where the signal originated
+ *	@cred contains the cred of the process where the signal originated, or
+ *	NULL if the current task is the originator.
  *	Return 0 if permission is granted.
  * @task_prctl:
  *	Check permission before performing a process control operation on the
@@ -752,6 +779,11 @@
  *	@type contains the requested communications type.
  *	@protocol contains the requested protocol.
  *	@kern set to 1 if a kernel socket.
+ * @socket_socketpair:
+ *	Check permissions before creating a fresh pair of sockets.
+ *	@socka contains the first socket structure.
+ *	@sockb contains the second socket structure.
+ *	Return 0 if permission is granted and the connection was established.
  * @socket_bind:
  *	Check permission before socket protocol layer bind operation is
  *	performed and the socket @sock is bound to the address specified in the
@@ -905,6 +937,33 @@
  *	This hook can be used by the module to update any security state
  *	associated with the TUN device's security structure.
  *	@security pointer to the TUN devices's security structure.
+ *
+ * Security hooks for SCTP
+ *
+ * @sctp_assoc_request:
+ *	Passes the @ep and @chunk->skb of the association INIT packet to
+ *	the security module.
+ *	@ep pointer to sctp endpoint structure.
+ *	@skb pointer to skbuff of association packet.
+ *	Return 0 on success, error on failure.
+ * @sctp_bind_connect:
+ *	Validiate permissions required for each address associated with sock
+ *	@sk. Depending on @optname, the addresses will be treated as either
+ *	for a connect or bind service. The @addrlen is calculated on each
+ *	ipv4 and ipv6 address using sizeof(struct sockaddr_in) or
+ *	sizeof(struct sockaddr_in6).
+ *	@sk pointer to sock structure.
+ *	@optname name of the option to validate.
+ *	@address list containing one or more ipv4/ipv6 addresses.
+ *	@addrlen total length of address(s).
+ *	Return 0 on success, error on failure.
+ * @sctp_sk_clone:
+ *	Called whenever a new socket is created by accept(2) (i.e. a TCP
+ *	style socket) or when a socket is 'peeled off' e.g userspace
+ *	calls sctp_peeloff(3).
+ *	@ep pointer to current sctp endpoint structure.
+ *	@sk pointer to current sock structure.
+ *	@sk pointer to new sock structure.
  *
  * Security hooks for Infiniband
  *
@@ -1229,7 +1288,7 @@
  *	@cred contains the credentials to use.
  *	@ns contains the user namespace we want the capability in
  *	@cap contains the capability <include/linux/capability.h>.
- *	@audit contains whether to write an audit message or not
+ *	@opts contains options for the capable check <include/linux/security.h>
  *	Return 0 if the capability is granted for @tsk.
  * @syslog:
  *	Check permission before accessing the kernel message ring or changing
@@ -1385,8 +1444,17 @@
  * @bpf_prog_free_security:
  *	Clean up the security information stored inside bpf prog.
  *
+ * @locked_down
+ *     Determine whether a kernel feature that potentially enables arbitrary
+ *     code execution in kernel space should be permitted.
+ *
+ *     @what: kernel feature being accessed
  */
 union security_list_options {
+	#define LSM_HOOK(RET, DEFAULT, NAME, ...) RET (*NAME)(__VA_ARGS__);
+	#include "lsm_hook_defs.h"
+	#undef LSM_HOOK
+
 	int (*binder_set_context_mgr)(const struct cred *mgr);
 	int (*binder_transaction)(const struct cred *from,
 					const struct cred *to);
@@ -1519,6 +1587,8 @@ union security_list_options {
 	int (*file_alloc_security)(struct file *file);
 	void (*file_free_security)(struct file *file);
 	int (*file_ioctl)(struct file *file, unsigned int cmd,
+				unsigned long arg);
+	int (*file_ioctl_compat)(struct file *file, unsigned int cmd,
 				unsigned long arg);
 	int (*mmap_addr)(unsigned long addr);
 	int (*mmap_file)(struct file *file, unsigned long reqprot,
@@ -1738,6 +1808,9 @@ union security_list_options {
 };
 
 struct security_hook_heads {
+	#define LSM_HOOK(RET, DEFAULT, NAME, ...) struct hlist_head NAME;
+	#include "lsm_hook_defs.h"
+	#undef LSM_HOOK
 	struct list_head binder_set_context_mgr;
 	struct list_head binder_transaction;
 	struct list_head binder_transfer_binder;
@@ -1817,6 +1890,7 @@ struct security_hook_heads {
 	struct list_head file_alloc_security;
 	struct list_head file_free_security;
 	struct list_head file_ioctl;
+	struct list_head file_ioctl_compat;
 	struct list_head mmap_addr;
 	struct list_head mmap_file;
 	struct list_head file_mprotect;
@@ -1977,11 +2051,29 @@ struct security_hook_heads {
  * For use with generic list macros for common operations.
  */
 struct security_hook_list {
-	struct list_head		list;
-	struct list_head		*head;
+	struct hlist_node		list;
+	struct hlist_head		*head;
 	union security_list_options	hook;
 	char				*lsm;
 } __randomize_layout;
+
+/*
+ * Security blob size or offset data.
+ */
+struct lsm_blob_sizes {
+	int	lbs_cred;
+	int	lbs_file;
+	int	lbs_inode;
+	int	lbs_ipc;
+	int	lbs_msg_msg;
+	int	lbs_task;
+};
+
+/*
+ * LSM_RET_VOID is used as the default value in LSM_HOOK definitions for void
+ * LSM hooks (in include/linux/lsm_hook_defs.h).
+ */
+#define LSM_RET_VOID ((void) 0)
 
 /*
  * Initializing a security_hook_list structure takes
@@ -1997,6 +2089,30 @@ extern char *lsm_names;
 
 extern void security_add_hooks(struct security_hook_list *hooks, int count,
 				char *lsm);
+
+#define LSM_FLAG_LEGACY_MAJOR	BIT(0)
+#define LSM_FLAG_EXCLUSIVE	BIT(1)
+
+enum lsm_order {
+	LSM_ORDER_FIRST = -1,	/* This is only for capabilities. */
+	LSM_ORDER_MUTABLE = 0,
+};
+
+struct lsm_info {
+	const char *name;	/* Required. */
+	enum lsm_order order;	/* Optional: default is LSM_ORDER_MUTABLE */
+	unsigned long flags;	/* Optional: flags describing LSM */
+	int *enabled;		/* Optional: controlled by CONFIG_LSM */
+	int (*init)(void);	/* Required. */
+	struct lsm_blob_sizes *blobs; /* Optional: for blob sharing. */
+};
+
+extern struct lsm_info __start_lsm_info[], __end_lsm_info[];
+
+#define DEFINE_LSM(lsm)							\
+	static struct lsm_info __lsm_##lsm				\
+		__used __section(.lsm_info.init)			\
+		__aligned(sizeof(unsigned long))
 
 #ifdef CONFIG_SECURITY_SELINUX_DISABLE
 /*
@@ -2017,7 +2133,7 @@ static inline void security_delete_hooks(struct security_hook_list *hooks,
 	int i;
 
 	for (i = 0; i < count; i++)
-		list_del_rcu(&hooks[i].list);
+		hlist_del_rcu(&hooks[i].list);
 }
 #endif /* CONFIG_SECURITY_SELINUX_DISABLE */
 
@@ -2028,17 +2144,8 @@ static inline void security_delete_hooks(struct security_hook_list *hooks,
 #define __lsm_ro_after_init	__ro_after_init
 #endif /* CONFIG_SECURITY_WRITABLE_HOOKS */
 
-extern int __init security_module_enable(const char *module);
 extern void __init capability_add_hooks(void);
-#ifdef CONFIG_SECURITY_YAMA
-extern void __init yama_add_hooks(void);
-#else
-static inline void __init yama_add_hooks(void) { }
-#endif
-#ifdef CONFIG_SECURITY_LOADPIN
-void __init loadpin_add_hooks(void);
-#else
-static inline void loadpin_add_hooks(void) { };
-#endif
+
+extern int lsm_inode_alloc(struct inode *inode);
 
 #endif /* ! __LINUX_LSM_HOOKS_H */
