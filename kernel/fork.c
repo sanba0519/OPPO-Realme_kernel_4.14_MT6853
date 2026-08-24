@@ -1723,7 +1723,6 @@ static __latent_entropy struct task_struct *copy_process(
 	int pidfd = -1, retval;
 	struct task_struct *p;
 	u64 clone_flags = args->flags;
-	struct file *pidfile = NULL;
 
 	if ((clone_flags & (CLONE_NEWNS|CLONE_FS)) == (CLONE_NEWNS|CLONE_FS))
 		return ERR_PTR(-EINVAL);
