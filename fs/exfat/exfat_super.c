@@ -129,7 +129,7 @@ static time_t accum_days_in_year[] = {
 static void _exfat_truncate(struct inode *inode, loff_t old_size);
 
 /* Convert a FAT time/date pair to a UNIX date (seconds since 1 1 70). */
-void exfat_time_fat2unix(struct exfat_sb_info *sbi, struct timespec *ts,
+void exfat_time_fat2unix(struct exfat_sb_info *sbi, struct timespec64 *ts,
 						 DATE_TIME_T *tp)
 {
 	time_t year = tp->Year;
@@ -148,7 +148,7 @@ void exfat_time_fat2unix(struct exfat_sb_info *sbi, struct timespec *ts,
 }
 
 /* Convert linear UNIX date to a FAT time/date pair. */
-void exfat_time_unix2fat(struct exfat_sb_info *sbi, struct timespec *ts,
+void exfat_time_unix2fat(struct exfat_sb_info *sbi, struct timespec64 *ts,
 						 DATE_TIME_T *tp)
 {
 	time_t second = ts->tv_sec;
@@ -715,7 +715,7 @@ static int exfat_create(struct inode *dir, struct dentry *dentry, int mode,
 {
 	struct super_block *sb = dir->i_sb;
 	struct inode *inode;
-	struct timespec ts;
+	struct timespec64 ts;
 	FILE_ID_T fid;
 	loff_t i_pos;
 	int err;
@@ -873,7 +873,7 @@ static int exfat_unlink(struct inode *dir, struct dentry *dentry)
 {
 	struct inode *inode = dentry->d_inode;
 	struct super_block *sb = dir->i_sb;
-	struct timespec ts;
+	struct timespec64 ts;
 	int err;
 
 	__lock_super(sb);
@@ -914,7 +914,7 @@ static int exfat_symlink(struct inode *dir, struct dentry *dentry, const char *t
 {
 	struct super_block *sb = dir->i_sb;
 	struct inode *inode;
-	struct timespec ts;
+	struct timespec64 ts;
 	FILE_ID_T fid;
 	loff_t i_pos;
 	int err;
@@ -994,7 +994,7 @@ static int exfat_mkdir(struct inode *dir, struct dentry *dentry, int mode)
 {
 	struct super_block *sb = dir->i_sb;
 	struct inode *inode;
-	struct timespec ts;
+	struct timespec64 ts;
 	FILE_ID_T fid;
 	loff_t i_pos;
 	int err;
@@ -1051,7 +1051,7 @@ static int exfat_rmdir(struct inode *dir, struct dentry *dentry)
 {
 	struct inode *inode = dentry->d_inode;
 	struct super_block *sb = dir->i_sb;
-	struct timespec ts;
+	struct timespec64 ts;
 	int err;
 
 	__lock_super(sb);
@@ -1101,7 +1101,7 @@ static int exfat_rename(struct inode *old_dir, struct dentry *old_dentry,
 {
 	struct inode *old_inode, *new_inode;
 	struct super_block *sb = old_dir->i_sb;
-	struct timespec ts;
+	struct timespec64 ts;
 	loff_t i_pos;
 	int err;
 
@@ -2354,7 +2354,7 @@ static int exfat_read_root(struct inode *inode)
 {
 	struct super_block *sb = inode->i_sb;
 	struct exfat_sb_info *sbi = EXFAT_SB(sb);
-	struct timespec ts;
+	struct timespec64 ts;
 	FS_INFO_T *p_fs = &(sbi->fs_info);
 	DIR_ENTRY_T info;
 

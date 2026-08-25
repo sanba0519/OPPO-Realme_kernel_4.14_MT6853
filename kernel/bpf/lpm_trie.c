@@ -444,7 +444,8 @@ out:
 	return ret;
 }
 
-static int trie_delete_elem(struct bpf_map *map, void *key)
+/* Called from syscall or from eBPF program */
+static int trie_delete_elem(struct bpf_map *map, void *_key)
 {
 	struct lpm_trie *trie = container_of(map, struct lpm_trie, map);
 	struct bpf_lpm_trie_key *key = _key;
@@ -565,7 +566,7 @@ static struct bpf_map *trie_alloc(union bpf_attr *attr)
 	    attr->value_size > LPM_VAL_SIZE_MAX)
 		return ERR_PTR(-EINVAL);
 
-	trie = kzalloc(sizeof(*trie), GFP_USER | __GFP_NOWARN);
+	trie = kzalloc(sizeof(*trie), GFP_KERNEL | __GFP_NOWARN);
 	if (!trie)
 		return ERR_PTR(-ENOMEM);
 

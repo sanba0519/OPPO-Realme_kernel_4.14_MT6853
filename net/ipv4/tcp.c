@@ -2656,9 +2656,6 @@ static int do_tcp_setsockopt(struct sock *sk, int level,
 
 	lock_sock(sk);
 
-	/* Hack optname to use TCP_NODELAY for everything */
-	optname=TCP_NODELAY;
-
 	switch (optname) {
 	case TCP_MAXSEG:
 		/* Values greater than interface MTU won't take effect. However
@@ -3696,11 +3693,11 @@ void __init tcp_init(void)
 
 	sysctl_tcp_wmem[0] = SK_MEM_QUANTUM;
 	sysctl_tcp_wmem[1] = 16*1024;
-	sysctl_tcp_wmem[2] = max(64*1024, max_wshare);
+	sysctl_tcp_wmem[2] = max(512*1024, max_wshare);
 
 	sysctl_tcp_rmem[0] = SK_MEM_QUANTUM;
 	sysctl_tcp_rmem[1] = 87380;
-	sysctl_tcp_rmem[2] = max(87380, max_rshare);
+	sysctl_tcp_rmem[2] = max(2*1024*1024, max_rshare);
 
 	pr_info("Hash tables configured (established %u bind %u)\n",
 		tcp_hashinfo.ehash_mask + 1, tcp_hashinfo.bhash_size);
