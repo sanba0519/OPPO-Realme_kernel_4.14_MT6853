@@ -197,23 +197,22 @@ jobs:
                 --enable CONFIG_DEVTMPFS_MOUNT \
                 --enable CONFIG_SECTION_MISMATCH_WARN_ONLY
 
-        # ReSukiSU: SUSFS selects the inline hook method; otherwise use manual hooks.
-        if [ "${{ github.event.inputs.SU }}" = "ReSukiSU" ]; then
-          if [ "${{ github.event.inputs.SUSFS }}" = "true" ]; then
-            echo "KSU_LOG: 启用 CONFIG_KSU + CONFIG_KSU_SUSFS inline hook"
-            ./scripts/config --file out/.config \
-              --enable CONFIG_KSU \
-              --enable CONFIG_KSU_SUSFS \
-              --disable CONFIG_KSU_MANUAL_HOOK \
-              --disable CONFIG_KSU_TRACEPOINT_HOOK
-          else
-            echo "KSU_LOG: 启用 CONFIG_KSU + CONFIG_KSU_MANUAL_HOOK"
-            ./scripts/config --file out/.config \
-              --enable CONFIG_KSU \
-              --enable CONFIG_KSU_MANUAL_HOOK \
-              --disable CONFIG_KSU_SUSFS \
-              --disable CONFIG_KSU_TRACEPOINT_HOOK
-          fi
+        # KernelSU 和 SUSFS 配置
+        # 如果启用了 SUSFS，无论哪个 SU 都必须启用 CONFIG_KSU_SUSFS
+        if [ "${{ github.event.inputs.SUSFS }}" = "true" ]; then
+          echo "KSU_LOG: 启用 CONFIG_KSU + CONFIG_KSU_SUSFS"
+          ./scripts/config --file out/.config \
+            --enable CONFIG_KSU \
+            --enable CONFIG_KSU_SUSFS \
+            --disable CONFIG_KSU_MANUAL_HOOK \
+            --disable CONFIG_KSU_TRACEPOINT_HOOK
+        elif [ "${{ github.event.inputs.SU }}" = "ReSukiSU" ]; then
+          echo "KSU_LOG: ReSukiSU 不启用 SUSFS，使用 manual hook"
+          ./scripts/config --file out/.config \
+            --enable CONFIG_KSU \
+            --enable CONFIG_KSU_MANUAL_HOOK \
+            --disable CONFIG_KSU_SUSFS \
+            --disable CONFIG_KSU_TRACEPOINT_HOOK
         fi
 
         make O=out ARCH=arm64 olddefconfig
