@@ -169,13 +169,82 @@ jobs:
         if [ "${{ github.event.inputs.DroidSpace }}" = "true" ]; then
           echo "启用 DroidSpace..."
           ./scripts/config --file out/.config \
+            --enable SYSCTL \
+            --enable SYSVIPC \
+            --enable POSIX_MQUEUE \
             --enable NAMESPACES \
-            --enable USER_NS \
+            --enable PID_NS \
+            --enable UTS_NS \
+            --enable IPC_NS \
+            --enable NET_NS \
+            --enable MULTIUSER \
+            --disable USER_NS \
             --enable DEVTMPFS \
-            --enable DEVTMPFS_MOUNT
+            --enable DEVTMPFS_MOUNT \
+            --enable SECCOMP \
+            --enable SECCOMP_FILTER \
+            --enable CGROUPS \
+            --enable CGROUP_DEVICE \
+            --enable CGROUP_PIDS \
+            --enable MEMCG \
+            --enable CGROUP_SCHED \
+            --enable FAIR_GROUP_SCHED \
+            --enable CGROUP_FREEZER \
+            --enable CGROUP_NET_PRIO \
+            --enable OVERLAY_FS \
+            --enable TMPFS_POSIX_ACL \
+            --enable TMPFS_XATTR \
+            --enable FW_LOADER \
+            --enable FW_LOADER_USER_HELPER \
+            --enable FW_LOADER_COMPRESS \
+            --enable VETH \
+            --enable BRIDGE \
+            --enable NETFILTER \
+            --enable BRIDGE_NETFILTER \
+            --enable NETFILTER_ADVANCED \
+            --enable NF_CONNTRACK \
+            --enable IP_NF_IPTABLES \
+            --enable IP_NF_FILTER \
+            --enable NF_NAT \
+            --enable NF_TABLES \
+            --enable IP_NF_TARGET_MASQUERADE \
+            --enable NETFILTER_XT_TARGET_MASQUERADE \
+            --enable NETFILTER_XT_TARGET_TCPMSS \
+            --enable NETFILTER_XT_MATCH_ADDRTYPE \
+            --enable NF_CONNTRACK_NETLINK \
+            --enable NF_NAT_REDIRECT \
+            --enable IP_ADVANCED_ROUTER \
+            --enable IP_MULTIPLE_TABLES \
+            --enable NF_CONNTRACK_IPV4 \
+            --enable NF_NAT_IPV4 \
+            --enable IP_NF_NAT \
+            --enable NETFILTER_XT_MATCH_COMMENT \
+            --enable NETFILTER_XT_MATCH_STATE \
+            --enable NETFILTER_XT_MATCH_CONNTRACK \
+            --enable NETFILTER_XT_MATCH_MULTIPORT \
+            --enable NETFILTER_XT_MATCH_HL \
+            --enable NETFILTER_XT_TARGET_REJECT \
+            --enable IP_NF_TARGET_REJECT \
+            --enable NETFILTER_XT_TARGET_LOG \
+            --enable IP_NF_TARGET_ULOG \
+            --enable NETFILTER_XT_MATCH_RECENT \
+            --enable NETFILTER_XT_MATCH_LIMIT \
+            --enable NETFILTER_XT_MATCH_HASHLIMIT \
+            --enable NETFILTER_XT_MATCH_OWNER \
+            --enable NETFILTER_XT_MATCH_PKTTYPE \
+            --enable NETFILTER_XT_MATCH_MARK \
+            --enable NETFILTER_XT_TARGET_MARK \
+            --enable IP_SET \
+            --enable IP_SET_HASH_IP \
+            --enable IP_SET_HASH_NET \
+            --enable NETFILTER_XT_SET \
+            --enable NETFILTER_NETLINK_QUEUE \
+            --enable NETFILTER_NETLINK_LOG \
+            --enable NETFILTER_XT_TARGET_NFLOG \
+            --disable ANDROID_PARANOID_NETWORK
           make O=out olddefconfig
         else
-          echo "不启用 DroidSpace..."
+          echo "不启用 DroidSpace，使用默认配置"
         fi
 
         # BBR
