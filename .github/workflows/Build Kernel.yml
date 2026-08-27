@@ -271,7 +271,9 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: ${{steps.gen_name.outputs.artifact_name}}
-        path: kernel_workspace/${{ steps.gen_name.outputs.artifact_name }}.zip
+        path: |
+          kernel_workspace/AnyKernel3/*
+          !kernel_workspace/AnyKernel3/*.zip
 
     - name: Generate Telegram caption
       id: gen_caption
