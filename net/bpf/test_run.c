@@ -10,7 +10,6 @@
 #include <linux/etherdevice.h>
 #include <linux/filter.h>
 #include <linux/sched/signal.h>
-#include <net/bpf_sk_storage.h>
 
 static __always_inline u32 bpf_test_run_one(struct bpf_prog *prog, void *ctx)
 {
@@ -134,7 +133,7 @@ int bpf_prog_test_run_skb(struct bpf_prog *prog, const union bpf_attr *kattr,
 	if (is_l2)
 		__skb_push(skb, ETH_HLEN);
 	if (is_direct_pkt_access)
-		bpf_compute_data_pointers(skb);
+		bpf_compute_data_end(skb);
 	retval = bpf_test_run(prog, skb, repeat, &duration);
 	if (!is_l2)
 		__skb_push(skb, ETH_HLEN);
@@ -163,7 +162,6 @@ int bpf_prog_test_run_xdp(struct bpf_prog *prog, const union bpf_attr *kattr,
 
 	xdp.data_hard_start = data;
 	xdp.data = data + XDP_PACKET_HEADROOM + NET_IP_ALIGN;
-	xdp.data_meta = xdp.data;
 	xdp.data_end = xdp.data + size;
 
 	retval = bpf_test_run(prog, &xdp, repeat, &duration);

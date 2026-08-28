@@ -1851,11 +1851,9 @@ SYSCALL_DEFINE4(recv, int, fd, void __user *, ubuf, size_t, size,
  *	to pass the user mode parameter for the protocols to sort out.
  */
 
-static int __sys_setsockopt(int fd, int level, int optname,
-			    char __user *optval, int optlen)
+SYSCALL_DEFINE5(setsockopt, int, fd, int, level, int, optname,
+		char __user *, optval, int, optlen)
 {
-	mm_segment_t oldfs = get_fs();
-	char *kernel_optval = NULL;
 	int err, fput_needed;
 	struct socket *sock;
 
@@ -1868,22 +1866,6 @@ static int __sys_setsockopt(int fd, int level, int optname,
 		if (err)
 			goto out_put;
 
-		err = BPF_CGROUP_RUN_PROG_SETSOCKOPT(sock->sk, &level,
-						     &optname, optval, &optlen,
-						     &kernel_optval);
-		if (err < 0) {
-			goto out_put;
-
-		} else if (err > 0) {
-			err = 0;
-			goto out_put;
-		}
-
-		if (kernel_optval) {
-			set_fs(KERNEL_DS);
-			optval = (char __user __force *)kernel_optval;
-		}
-
 		if (level == SOL_SOCKET)
 			err =
 			    sock_setsockopt(sock, level, optname, optval,
@@ -1892,22 +1874,10 @@ static int __sys_setsockopt(int fd, int level, int optname,
 			err =
 			    sock->ops->setsockopt(sock, level, optname, optval,
 						  optlen);
-
-		if (kernel_optval) {
-			set_fs(oldfs);
-			kfree(kernel_optval);
-		}
-
 out_put:
 		fput_light(sock->file, fput_needed);
 	}
 	return err;
-}
-
-SYSCALL_DEFINE5(setsockopt, int, fd, int, level, int, optname,
-		char __user *, optval, int, optlen)
-{
-	return __sys_setsockopt(fd, level, optname, optval, optlen);
 }
 
 /*
@@ -1915,20 +1885,17 @@ SYSCALL_DEFINE5(setsockopt, int, fd, int, level, int, optname,
  *	to pass a user mode parameter for the protocols to sort out.
  */
 
-static int __sys_getsockopt(int fd, int level, int optname,
-			    char __user *optval, int __user *optlen)
+SYSCALL_DEFINE5(getsockopt, int, fd, int, level, int, optname,
+		char __user *, optval, int __user *, optlen)
 {
 	int err, fput_needed;
 	struct socket *sock;
-	int max_optlen;
 
 	sock = sockfd_lookup_light(fd, &err, &fput_needed);
 	if (sock != NULL) {
 		err = security_socket_getsockopt(sock, level, optname);
 		if (err)
 			goto out_put;
-
-		max_optlen = BPF_CGROUP_GETSOCKOPT_MAX_OPTLEN(optlen);
 
 		if (level == SOL_SOCKET)
 			err =
@@ -1938,21 +1905,10 @@ static int __sys_getsockopt(int fd, int level, int optname,
 			err =
 			    sock->ops->getsockopt(sock, level, optname, optval,
 						  optlen);
-
-		err = BPF_CGROUP_RUN_PROG_GETSOCKOPT(sock->sk, level, optname,
-						     optval, optlen,
-						     max_optlen, err);
-
 out_put:
 		fput_light(sock->file, fput_needed);
 	}
 	return err;
-}
-
-SYSCALL_DEFINE5(getsockopt, int, fd, int, level, int, optname,
-		char __user *, optval, int __user *, optlen)
-{
-	return __sys_getsockopt(fd, level, optname, optval, optlen);
 }
 
 /*
@@ -2571,11 +2527,11 @@ SYSCALL_DEFINE2(socketcall, int, call, unsigned long __user *, args)
 		err = sys_shutdown(a0, a1);
 		break;
 	case SYS_SETSOCKOPT:
-		err = __sys_setsockopt(a0, a1, a[2], (char __user *)a[3], a[4]);
+		err = sys_setsockopt(a0, a1, a[2], (char __user *)a[3], a[4]);
 		break;
 	case SYS_GETSOCKOPT:
 		err =
-		    __sys_getsockopt(a0, a1, a[2], (char __user *)a[3],
+		    sys_getsockopt(a0, a1, a[2], (char __user *)a[3],
 				   (int __user *)a[4]);
 		break;
 	case SYS_SENDMSG:

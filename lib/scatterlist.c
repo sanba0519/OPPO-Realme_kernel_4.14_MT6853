@@ -132,7 +132,14 @@ EXPORT_SYMBOL(sg_last);
 void sg_init_table(struct scatterlist *sgl, unsigned int nents)
 {
 	memset(sgl, 0, sizeof(*sgl) * nents);
-	sg_init_marker(sgl, nents);
+#ifdef CONFIG_DEBUG_SG
+	{
+		unsigned int i;
+		for (i = 0; i < nents; i++)
+			sgl[i].sg_magic = SG_MAGIC;
+	}
+#endif
+	sg_mark_end(&sgl[nents - 1]);
 }
 EXPORT_SYMBOL(sg_init_table);
 

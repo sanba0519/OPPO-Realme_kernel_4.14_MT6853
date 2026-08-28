@@ -236,9 +236,6 @@ struct sock_common {
 	/* public: */
 };
 
-struct bpf_local_storage;
-struct bpf_sk_storage;
-
 /**
   *	struct sock - network layer representation of sockets
   *	@__sk_common: shared layout with inet_timewait_sock
@@ -493,9 +490,6 @@ struct sock {
 						  struct sk_buff *skb);
 	void                    (*sk_destruct)(struct sock *sk);
 	struct sock_reuseport __rcu	*sk_reuseport_cb;
-#ifdef CONFIG_BPF_SYSCALL
-	struct bpf_sk_storage __rcu	*sk_bpf_storage;
-#endif
 	struct rcu_head		sk_rcu;
 };
 
@@ -1050,9 +1044,6 @@ static inline void sk_prot_clear_nulls(struct sock *sk, int size)
 struct proto {
 	void			(*close)(struct sock *sk,
 					long timeout);
-	int			(*pre_connect)(struct sock *sk,
-					struct sockaddr *uaddr,
-					int addr_len);
 	int			(*connect)(struct sock *sk,
 					struct sockaddr *uaddr,
 					int addr_len);
@@ -1112,7 +1103,6 @@ struct proto {
 #endif
 
 	bool			(*stream_memory_free)(const struct sock *sk);
-	bool			(*stream_memory_read)(const struct sock *sk);
 	/* Memory pressure */
 	void			(*enter_memory_pressure)(struct sock *sk);
 	void			(*leave_memory_pressure)(struct sock *sk);
@@ -2179,10 +2169,6 @@ static inline struct page_frag *sk_page_frag(struct sock *sk)
 }
 
 bool sk_page_frag_refill(struct sock *sk, struct page_frag *pfrag);
-
-int sk_alloc_sg(struct sock *sk, int len, struct scatterlist *sg,
-		int sg_start, int *sg_curr, unsigned int *sg_size,
-		int first_coalesce);
 
 /*
  *	Default write policy as shown to user space via poll/select/SIGIO

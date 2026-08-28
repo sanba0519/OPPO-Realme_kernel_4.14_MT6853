@@ -8,8 +8,6 @@
  * published by the Free Software Foundation.
  */
 
-#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
-
 #include <linux/module.h>
 #include <linux/skbuff.h>
 #include <linux/netfilter.h>
@@ -21,7 +19,8 @@ static int xt_nat_checkentry_v0(const struct xt_tgchk_param *par)
 	const struct nf_nat_ipv4_multi_range_compat *mr = par->targinfo;
 
 	if (mr->rangesize != 1) {
-		pr_info_ratelimited("multiple ranges no longer supported\n");
+		pr_info("%s: multiple ranges no longer supported\n",
+			par->target->name);
 		return -EINVAL;
 	}
 	return nf_ct_netns_get(par->net, par->family);
