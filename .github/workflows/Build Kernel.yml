@@ -318,7 +318,9 @@ jobs:
         # NoMount 使用内建方式，随内核镜像一起打包
         if [ "${{ github.event.inputs.nomount }}" = "true" ]; then
           echo "启用 NoMount..."
-          ./scripts/config --file out/.config --enable CONFIG_NOMOUNT
+          ./scripts/config --file out/.config \
+            --enable CONFIG_NOMOUNT \
+            --enable CONFIG_KEYS
         else
           echo "不启用 NoMount..."
           ./scripts/config --file out/.config --disable CONFIG_NOMOUNT
@@ -328,7 +330,8 @@ jobs:
 
         if [ "${{ github.event.inputs.nomount }}" = "true" ]; then
           grep -qx 'CONFIG_NOMOUNT=y' out/.config \
-            || { echo "NoMount 配置未生效，终止编译"; exit 1; }
+            && grep -qx 'CONFIG_KEYS=y' out/.config \
+            || { echo "NoMount 或 CONFIG_KEYS 配置未生效，终止编译"; exit 1; }
         elif grep -Eq '^CONFIG_NOMOUNT=(y|m)$' out/.config; then
           echo "NoMount 未关闭，终止编译"
           exit 1
