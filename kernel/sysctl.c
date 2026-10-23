@@ -1447,7 +1447,6 @@ static struct ctl_table kern_table[] = {
 		.extra1		= &zero,
 		.extra2		= &two,
 	},
-#endif
 	{
 		.procname	= "bpf_stats_enabled",
 		.data		= &bpf_stats_enabled_key.key,
@@ -1455,6 +1454,7 @@ static struct ctl_table kern_table[] = {
 		.mode		= 0644,
 		.proc_handler	= bpf_stats_handler,
 	},
+#endif
 #if defined(CONFIG_TREE_RCU) || defined(CONFIG_PREEMPT_RCU)
 	{
 		.procname	= "panic_on_rcu_stall",
@@ -2748,7 +2748,6 @@ static int __do_proc_dointvec(void *tbl_data, struct ctl_table *table,
 	if (write && !err && left)
 		left -= proc_skip_spaces(&p);
 	if (write) {
-		kfree(kbuf);
 		if (first)
 			return err ? : -EINVAL;
 	}
@@ -2790,10 +2789,6 @@ static int do_proc_douintvec_w(unsigned int *tbl_data,
 
 	if (left > PAGE_SIZE - 1)
 		left = PAGE_SIZE - 1;
-
-	p = kbuf = memdup_user_nul(buffer, left);
-	if (IS_ERR(kbuf))
-		return -EINVAL;
 
 	left -= proc_skip_spaces(&p);
 	if (!left) {
@@ -3217,7 +3212,6 @@ static int __do_proc_doulongvec_minmax(void *data, struct ctl_table *table, int 
 	if (write && !err)
 		left -= proc_skip_spaces(&p);
 	if (write) {
-		kfree(kbuf);
 		if (first)
 			return err ? : -EINVAL;
 	}

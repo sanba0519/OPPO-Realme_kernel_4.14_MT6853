@@ -2785,7 +2785,7 @@ out_only_mutex:
 		 * for detecting, at fsync time, if the inode isn't yet in the
 		 * log tree or it's there but not up to date.
 		 */
-		struct timespec now = current_time(inode);
+		struct timespec64 now = current_time(inode);
 
 		inode_inc_iversion(inode);
 		inode->i_mtime = now;

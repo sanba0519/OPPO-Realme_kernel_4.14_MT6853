@@ -4,15 +4,6 @@ on:
   workflow_dispatch:
     inputs:
 
-      SU:
-        type: choice
-        description: "选择要使用的 Root 管理器"
-        required: true
-        default: RKSU
-        options:
-          - RKSU
-          - ReSukiSU
-
       BBR:
         type: boolean
         description: "是否启用 BBR 加速（不了解请不要启用）"
@@ -25,11 +16,6 @@ on:
         required: false
         default: false
 
-      SUSFS:
-        type: boolean
-        description: "是否加入 SUSFS"
-        required: false
-        default: false
 
 
       TG:
@@ -89,63 +75,8 @@ jobs:
         git clone -b "$CLONE_BRANCH" --single-branch https://github.com/sanba0519/OPPO-Realme_kernel_4.14_MT6853.git android-kernel
         cd android-kernel
 
-    - name: Apply patch
-      run: |
-        cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
-        if [ "${{ github.event.inputs.SU }}" = "RKSU" ]; then
-          echo "KSU_LOG: 选择了 RKSU"
-          echo "KSU_LOG: 开始下载并应用 RKSU 官方 4.14 patch"
-          wget https://github.com/rksuorg/kernel_patches/raw/master/manual_hook/kernel-4.14.patch -O ksu-4.14.patch || { echo "下载 patch 失败"; exit 1; }
-          patch -p1 < ksu-4.14.patch || { echo "patch 应用失败"; cat ksu-4.14.patch; exit 1; }
-
-        elif [ "${{ github.event.inputs.SU }}" = "ReSukiSU" ]; then
-          echo "KSU_LOG: 选择了 ReSukiSU"
-          if [ "${{ github.event.inputs.SUSFS }}" = "true" ]; then
-            echo "KSU_LOG: SUSFS 使用 ReSukiSU inline hooks，跳过 4.14 manual hook patch"
-          else
-            echo "KSU_LOG: 开始下载并应用 ReSukiSU 官方 4.14 manual hook patch"
-            wget -O resukisu-4.14.patch \
-                https://raw.githubusercontent.com/ReSukiSU/ReSukiSU_Patches/main/scope-minimized/kernel-4.14.patch \
-              || { echo "下载 ReSukiSU 官方 patch 失败"; exit 1; }
-            patch -p1 < resukisu-4.14.patch || { echo "ReSukiSU 官方 patch 应用失败"; cat resukisu-4.14.patch; exit 1; }
-          fi
-
-        else
-          echo "KSU_LOG: 未知的 SU 选项，默认使用 RKSU"
-        fi
-
-        cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
-
-        if [ "${{ github.event.inputs.SUSFS }}" = "true" ]; then
-          echo "KSU_LOG: 开启 SUSFS"
-          wget https://raw.githubusercontent.com/sanba0519/Kernel-patch/refs/heads/main/susfs_patch_to_4.14.patch -O susfs-4.14.patch
-          patch -p1 < susfs-4.14.patch || { echo "SUSFS patch 应用失败"; exit 1; }
-          # A label cannot be followed directly by a declaration in GNU C89.
-          sed -i 's/^orig_flow:$/orig_flow:;/' fs/notify/fdinfo.c
-          grep -q '^orig_flow:;$' fs/notify/fdinfo.c \
-            || { echo "SUSFS fdinfo 4.14 兼容修正失败"; exit 1; }
-        fi
 
 
-    - name: Setup KernelSU
-      run: |
-        cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
-        rm -rf KernelSU
-        if [ "${{ github.event.inputs.SU }}" = "ReSukiSU" ]; then
-          echo "KSU_LOG: Setup ReSukiSU"
-          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s main
-          if [ "${{ github.event.inputs.SUSFS }}" = "true" ]; then
-            echo "KSU_LOG: 应用 ReSukiSU SUSFS inline hooks"
-            curl -LfsS \
-              https://raw.githubusercontent.com/JackA1ltman/NonGKI_Kernel_Build_2nd/mainline/Patches/susfs_inline_hook_patches.sh \
-              -o susfs_inline_hook_patches.sh \
-              || { echo "下载 SUSFS inline hook 脚本失败"; exit 1; }
-            bash susfs_inline_hook_patches.sh
-          fi
-        else
-          echo "KSU_LOG: Setup RKSU (rsuntk)"
-          curl -LSs "https://raw.githubusercontent.com/rsuntk/KernelSU/main/kernel/setup.sh" | bash -s main
-        fi
 
     - name: Setup ccache
       uses: hendrikmuhs/ccache-action@v1.2
@@ -267,23 +198,7 @@ jobs:
                 --enable CONFIG_DEVTMPFS_MOUNT \
                 --enable CONFIG_SECTION_MISMATCH_WARN_ONLY
 
-        # KernelSU 和 SUSFS 配置
-        # 如果启用了 SUSFS，无论哪个 SU 都必须启用 CONFIG_KSU_SUSFS
-        if [ "${{ github.event.inputs.SUSFS }}" = "true" ]; then
-          echo "KSU_LOG: 启用 CONFIG_KSU + CONFIG_KSU_SUSFS"
-          ./scripts/config --file out/.config \
-            --enable CONFIG_KSU \
-            --enable CONFIG_KSU_SUSFS \
-            --disable CONFIG_KSU_MANUAL_HOOK \
-            --disable CONFIG_KSU_TRACEPOINT_HOOK
-        elif [ "${{ github.event.inputs.SU }}" = "ReSukiSU" ]; then
-          echo "KSU_LOG: ReSukiSU 不启用 SUSFS，使用 manual hook"
-          ./scripts/config --file out/.config \
-            --enable CONFIG_KSU \
-            --enable CONFIG_KSU_MANUAL_HOOK \
-            --disable CONFIG_KSU_SUSFS \
-            --disable CONFIG_KSU_TRACEPOINT_HOOK
-        fi
+
 
         make O=out ARCH=arm64 olddefconfig
 
