@@ -36,6 +36,7 @@
 #include "hf_manager.h"
 #include "sensor_list.h"
 #include "mtk_nanohub_ipi.h"
+#include "../sensor_vendor_sanitize.h"
 #include <linux/of_gpio.h>
 #include <linux/regulator/consumer.h>
 #include <mt-plat/upmu_common.h>
@@ -533,6 +534,9 @@ static void mtk_nanohub_get_sensor_info(void)
 				sizeof(support_sensors[j].name));
 		strlcpy(support_sensors[j].vendor, sensor_state[i].vendor,
 				sizeof(support_sensors[j].vendor));
+		/* Sanitize: firmware-reported vendor must not be an AOSP placeholder. */
+		sensor_vendor_sanitize(support_sensors[j].vendor,
+				sizeof(support_sensors[j].vendor));
 		j++;
 	}
 	support_size = j;
@@ -551,7 +555,8 @@ static void mtk_nanohub_set_sensor_info(struct sensor_info *info,
 		p->sensorType = 0;
 	else {
 		strlcpy(p->name, info->name, sizeof(p->name));
-		if (strlen(info->vendor))
+		if (strlen(info->vendor) &&
+		    !vendor_contains_aosp(info->vendor, sizeof(info->vendor)))
 			strlcpy(p->vendor, info->vendor, sizeof(p->vendor));
 	}
 }

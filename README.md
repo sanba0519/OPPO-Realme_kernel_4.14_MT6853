@@ -30,13 +30,11 @@
  - 选择Root管理器以及功能 点击`Run workflow`
  - 等待构建完成并刷入~
 
- ## 如何刷入？
+## 如何刷入？
  * 首先务必Root你的手机并升级系统至安卓12
     * 在rec刷入
-      
       or
     * 先用Magisk `root`你的手机 然后使用刷写内核工具刷入
-
       比如`Franco Kernel Manager`
 
 ***
@@ -61,9 +59,50 @@ Upstream:
      - [ ] [BBG](https://github.com/vc-teahouse/Baseband-guard)防格机
      - [ ] So on...
 - [x] 修补bpf
+- [x] 传感器vendor消毒 过 Miscellaneous Check 5（内核层 + [sensor_vendor_fix.sh](#sensor_vendor_fixsh) 用户层）
 - [x] 自动发布到[TG频道](https://t.me/mt6853o)
 
 ***
+
+## 刷入后教程
+
+### 1️⃣ 确认内核生效
+```sh
+su -c 'cat /proc/version'
+```
+> 应显示 `4.14.186-by-sanba` + `clang` + 本次构建日期，时间戳不对就是没刷上
+
+### 2️⃣ 传感器 vendor 修复（过 Miscellaneous Check 5）
+```sh
+# 先看计数（>3 就是中招）
+su -c 'dumpsys sensorservice | grep -ci aosp'
+
+# 下载脚本（raw 失败自动切 jsDelivr）并执行
+su -c 'cd /sdcard/Download && { wget -O svf.sh https://raw.githubusercontent.com/HoshinoOVO/OPPO-Realme_kernel_4.14_MT6853/main/sensor_vendor_fix.sh || wget -O svf.sh https://cdn.jsdelivr.net/gh/HoshinoOVO/OPPO-Realme_kernel_4.14_MT6853@main/sensor_vendor_fix.sh; } && wc -c svf.sh && sh svf.sh apply'
+```
+重启后再查一次计数，应为 **0**
+
+### 3️⃣ OTA / 重刷 ROM 后
+```sh
+su -c 'sh /sdcard/Download/svf.sh restore'   # 重启
+```
+然后重新 `apply` 一次
+
+***
+
+## sensor_vendor_fix.sh
+
+风控 SDK 会统计 vendor 含 `AOSP` 的传感器数量（>3 判定模拟器）。HAL 缺融合传感器时
+SensorService 会兜底注册 8 个 `AOSP` vendor 传感器，本脚本把 `libsensorservice.so`
+里的 `AOSP` 等长改写为 `MTK!`，模块方式 systemless 挂载，不动 system 分区。
+
+- `apply` 打补丁+生成模块 | `status` 查看计数 | `restore` 还原
+- 64/32 位自动探测，SELinux 标签自动处理，重启生效
+- 内核侧已内置 nanohub/sensorhub vendor 消毒，脚本管用户态，双层覆盖
+- OTA 后：restore → 重启 → apply
+
+***
+
 ## 鸣谢
 [RKSU](https://github.com/rsuntk/KernelSU) 一个专门为`no-GIK`内核的KernelSU分支
 
@@ -81,6 +120,3 @@ Upstream:
 <a href="https://github.com/sanba0519/OPPO-Realme_kernel_4.14_MT6853/graphs/contributors">
   <img src="https://contrib.rocks/image?repo=sanba0519/OPPO-Realme_kernel_4.14_MT6853" />
 </a>
-
-
-

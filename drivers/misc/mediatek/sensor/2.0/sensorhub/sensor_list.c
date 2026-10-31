@@ -23,6 +23,7 @@
 #include "sensor_comm.h"
 #include "sensor_list.h"
 #include "share_memory.h"
+#include "../sensor_vendor_sanitize.h"
 
 static DEFINE_MUTEX(bus_user_lock);
 static atomic_t sensor_list_sequence;
@@ -122,6 +123,8 @@ static int sensor_list_seq_get_list(struct sensor_info *list,
 		list[i].gain = info.gain;
 		strlcpy(list[i].name, info.name, sizeof(list[i].name));
 		strlcpy(list[i].vendor, info.vendor, sizeof(list[i].vendor));
+		/* Sanitize: SCP-reported vendor must not be an AOSP placeholder. */
+		sensor_vendor_sanitize(list[i].vendor, sizeof(list[i].vendor));
 		i++;
 	}
 	return i;
