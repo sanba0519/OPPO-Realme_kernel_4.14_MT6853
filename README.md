@@ -53,7 +53,7 @@ Upstream:
 - [x] 内置[BakaSU](https://github.com/Baka-SU/BakaSU)
 - [x] 开放创意工坊
      - [x] BBR加速
-     - [x] SUSFS-V2.2.0
+     - [x] SUSFS-V2.3.0
      - [x] [DroidSpaces](https://github.com/ravindu644/Droidspaces-OSS)
      - [x] 墓碑 - [Cirno](https://cirno.shrairo.top/)
      - [x] [NoMount](https://github.com/maxsteeel/nomount)
@@ -70,6 +70,8 @@ Upstream:
 [BakaSU](https://github.com/Baka-SU/BakaSU) KernelSU 的分支
 
 [NonGKI_Kernel_Build_2nd](https://github.com/JackA1ltman/NonGKI_Kernel_Build_2nd) 一个专注于No-GKI内核编译的项目
+
+[Kernel-patch](https://github.com/sanba0519/Kernel-patch) 自己的patch文件repo
 
 [android_kernel_mtk6853](https://github.com/wu17481748/android_kernel_mtk6853) 上游项目 没有它就没有现在的项目
 
